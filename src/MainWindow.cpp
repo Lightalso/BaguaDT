@@ -85,6 +85,7 @@ MainWindow::MainWindow(QWidget *p) : QMainWindow(p) {
     setupMenus();
     setupDocks();
     setupReplayDock();
+    setupAssemblyDock();
     statusBar()->showMessage(QStringLiteral("就绪 · 场景编辑器"));
     countLabel = new QLabel;
     statusBar()->addPermanentWidget(countLabel);
@@ -122,6 +123,13 @@ void MainWindow::setupMenus() {
         auto p = QCoreApplication::applicationDirPath() + "/examples/hsc-native-contact.bagua.json";
         if (!QFileInfo::exists(p))
             p = QDir::currentPath() + "/examples/hsc-native-contact.bagua.json";
+        openPath(p);
+    });
+    auto *linkCart = tools->addAction(QStringLiteral("打开装配示例（双轮悬架）"));
+    connect(linkCart, &QAction::triggered, this, [this] {
+        auto p = QCoreApplication::applicationDirPath() + "/examples/link-cart.bagua.json";
+        if (!QFileInfo::exists(p))
+            p = QDir::currentPath() + "/examples/link-cart.bagua.json";
         openPath(p);
     });
     auto *toolbar = addToolBar(QStringLiteral("主工具栏"));
@@ -475,6 +483,7 @@ void MainWindow::activateDocument(int index) {
         old->model->view = viewport->cameraJson();
         old->tool = viewport->tool;
     }
+    pickTarget=0;viewport->anchorPicking=false;loadedLink={};
     scene = doc->model.get();
     viewport->setScene(doc->replayActive ? &doc->replayPreview : doc->physics.active() ? &doc->physics.preview : scene);
     viewport->editingEnabled = !(doc->physics.active() || doc->replayActive);
@@ -853,6 +862,7 @@ void MainWindow::syncInspector() {
         color->setText(QStringLiteral("选择颜色…"));
     }
     syncing = false;
+    syncAssemblyPanel();
 }
 void MainWindow::commitFields() {
     if (syncing || editingLocked() || !scene->current())
@@ -945,7 +955,7 @@ bool MainWindow::openPath(const QString &path) {
     auto model = std::make_unique<Scene>();
     QString error;
     if (!model->load(resolved, &error)) {
-        QMessageBox::warning(this, QStringLiteral("打开失败"), error);
+        if(!property("nonInteractive").toBool())QMessageBox::warning(this, QStringLiteral("打开失败"), error);
         log(QStringLiteral("打开失败：") + error);
         return false;
     }
@@ -1125,9 +1135,10 @@ void MainWindow::advanceSimulation() {
     } else {
         physicsAccumulator += std::min(.1, physicsClock.nsecsElapsed() * 1e-9);
         physicsClock.restart();
-        const int steps = int(physicsAccumulator / Physics::timeStep);
+        const double stepSize = d->physics.stepSize();
+        const int steps = int(physicsAccumulator / stepSize);
         if (steps > 0) {
-            physicsAccumulator -= steps * Physics::timeStep;
+            physicsAccumulator -= steps * stepSize;
             if (!d->physics.step(steps, &error)) {
                 pauseSimulation();
                 log(QStringLiteral("仿真失败，请重置：") + error);
@@ -1145,6 +1156,7 @@ void MainWindow::advanceSimulation() {
                                    .arg(stats.relativeResidual, 0, 'g', 2));
     }
     physicsStatus->setToolTip(d->physics.solverDescription());
+    updateLinkDiagnostics();
 }
 void MainWindow::updateSimulationUi() {
     const bool active = editingLocked(), running = simulationRunning();

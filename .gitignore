@@ -66,6 +66,7 @@ desktop.ini
 .acl-recovery/
 # 本机对话/笔记存档。若要把它纳入版本库，删除下面这一行即可。
 gpt对话历史.md
+deepseek对话历史.md
 # 直接在仓库根目录生成的录制结果；示例数据在 examples/ 下，不受影响。
 /*.brec
 

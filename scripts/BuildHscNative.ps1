@@ -21,6 +21,7 @@ New-Item -ItemType Directory -Force "$nativeRoot/vcpkg_cache","$nativeRoot/regis
 $py='C:/Users/Lightalso/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe'
 function Invoke-Native([string]$exe,[string[]]$parameters){& $exe @parameters;if($LASTEXITCODE -ne 0){throw "$exe failed with $LASTEXITCODE"}}
 if($BuildOnly) {
+    Invoke-Native $py @('scripts/hsc_native/patch.py')
     $cmake=Join-Path $vsRoot 'Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe'
     Invoke-Native $cmake @('--build',"$nativeRoot/build",'--parallel','4')
     exit

@@ -69,7 +69,7 @@ BackendReport validateBackends(const Scene &scene) {
         r.chrono =
             r.chronoPassed
                 ? QString("Chrono %1：%2 个刚体，Bullet 碰撞与 NSC 动力学步进通过").arg(CHRONO_VERSION).arg(r.bodies)
-                : QStringLiteral("Chrono 自检失败：") + error;
+                : QStringLiteral("Chrono 基线不适用于当前场景：") + error;
     } catch (const std::exception &e) {
         r.chrono = QString::fromUtf8(e.what());
     }

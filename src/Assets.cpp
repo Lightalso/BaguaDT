@@ -85,7 +85,10 @@ QJsonObject meshJson(const MeshData &m) {
     for (auto i : m.indices)
         indices.append(int(i));
     for (auto i:m.tetrahedra) tetrahedra.append(int(i));
-    return {{"id", m.id},         {"name", m.name},         {"source", m.source},
+    QJsonArray frameVertices,frameInverse;
+    for(auto i:m.frameVertices)frameVertices.append(int(i));
+    if(!frameVertices.isEmpty())for(int r=0;r<4;++r)for(int c=0;c<4;++c)frameInverse.append(m.frameRestInverse(r,c));
+    return {{"frameVertices",frameVertices},{"frameRestInverse",frameInverse},{"id", m.id},         {"name", m.name},         {"source", m.source},
             {"sha256", m.sha256}, {"positions", positions}, {"indices", indices}, {"tetrahedra",tetrahedra}};
 }
 std::shared_ptr<const MeshData> readMesh(const QJsonObject &j, QString *error) {
@@ -120,6 +123,13 @@ std::shared_ptr<const MeshData> readMesh(const QJsonObject &j, QString *error) {
             check(ts.size()%4==0 && ts.size()<=4000000,"Invalid tetrahedron count");
             for(auto value:ts){double d=value.toDouble(-1);check(d>=0 && d<m->positions.size() && std::floor(d)==d,"Invalid tetrahedron index");m->tetrahedra.push_back(quint32(d));}
             for(qsizetype i=0;i<m->tetrahedra.size();i+=4){auto a=m->positions[m->tetrahedra[i]],b=m->positions[m->tetrahedra[i+1]],c=m->positions[m->tetrahedra[i+2]],d=m->positions[m->tetrahedra[i+3]];double volume=QVector3D::dotProduct(b-a,QVector3D::crossProduct(c-a,d-a));check(std::isfinite(volume) && volume!=0,"Degenerate tetrahedron");}
+        }
+        if(!j["frameVertices"].toArray().isEmpty()){
+            auto ids=j["frameVertices"].toArray(),matrix=j["frameRestInverse"].toArray();
+            check(ids.size()==4 && matrix.size()==16,"Invalid body frame metadata");
+            for(auto v:ids){double d=v.toDouble(-1);check(d>=0 && d<m->positions.size() && std::floor(d)==d,"Invalid body frame vertex");m->frameVertices.push_back(quint32(d));}
+            for(int r=0;r<4;++r)for(int c=0;c<4;++c){double d=matrix[r*4+c].toDouble(std::numeric_limits<double>::quiet_NaN());check(std::isfinite(d),"Invalid body frame inverse");m->frameRestInverse(r,c)=float(d);}
+            check(std::abs(m->frameRestInverse.determinant())>1e-20f,"Singular body frame");
         }
         return m;
     } catch (const std::exception &e) {

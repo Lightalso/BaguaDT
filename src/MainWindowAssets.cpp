@@ -119,7 +119,7 @@ void MainWindow::setupReplayDock() {
         auto *d = activeDocument();
         if (!d || d->replayActive || d->capturing)
             return;
-        if (!simulationActive() && !startSimulation())
+        if (!startSimulation())
             return;
         beginRecording();
     });
@@ -128,7 +128,7 @@ void MainWindow::setupReplayDock() {
     recordOffline = new QCheckBox(QStringLiteral("离线高质量"));
     recordOffline->setObjectName("recordOffline");
     recordOffline->setToolTip(QStringLiteral("录制时锁定固定步长：每个节拍只推进一个物理步并记一帧，不追实时。\n"
-                                             "单帧耗时较高时仿真会明显变慢，但回放帧间距恒为 1/240 s，不会因卡顿而跳帧。"));
+                                             "单帧耗时较高时仿真会明显变慢，但回放帧间距等于场景 dt，不会因卡顿而跳帧；此开关不改变物理精度或渲染分辨率。"));
     row->addWidget(recordOffline);
     connect(recordOffline, &QCheckBox::toggled, this, [this](bool on) {
         auto *d = activeDocument();
@@ -138,9 +138,11 @@ void MainWindow::setupReplayDock() {
         physicsAccumulator = 0;
         log(on ? QStringLiteral("录制采样：离线高质量（锁步，一帧一个物理步，不追实时）。")
                : QStringLiteral("录制采样：实时（按实际时间推进，帧间距随负载变化）。"));
-        if (d->capturing)
-            d->recording().metadata["sampling"] =
-                on ? "lock-step fixed timestep" : "render-tick physical timestamps";
+        if (d->capturing) {
+            auto changes=d->recording().metadata["samplingChanges"].toArray();
+            changes.append(QJsonObject{{"fromFrame",d->recording().frameCount()},{"time",d->physics.time()-d->captureOrigin},{"mode",on?"lock-step fixed timestep":"render-tick physical timestamps"}});
+            d->recording().metadata["samplingChanges"]=changes;d->recording().metadata["sampling"]="mixed";
+        }
     });
     exportRecordingAction->setEnabled(false);
     button(QStringLiteral("打开记录…"), "openRecordingButton", [this] {
@@ -326,12 +328,12 @@ bool MainWindow::beginRecording() {
     d->recording().begin(d->physics.preview, {{"producer", d->physics.solverDescription().prepend("BaguaDT ")},
                                             {"hscEnabled", d->physics.hscActive()},
                                             {"created", QDateTime::currentDateTimeUtc().toString(Qt::ISODate)},
-                                            {"integrationStep", Physics::timeStep},
+                                            {"integrationStep", d->physics.stepSize()},
                                             {"sampling", d->offlineCapture ? "lock-step fixed timestep"
                                                                            : "render-tick physical timestamps"}});
     d->recording().initial.view = viewport->cameraJson();
     d->capturing = true;
-    log(d->offlineCapture ? QStringLiteral("开始录制：离线高质量模式，每个物理步记一帧，帧间距恒为 1/240 s。")
+    log(d->offlineCapture ? QStringLiteral("开始录制：逐步采样，每个物理步记一帧，帧间距 %1 s。").arg(d->physics.stepSize(),0,'g',8)
                           : QStringLiteral("开始录制：记录实际物理时间与对象状态。"));
     updateReplayUi();
     return true;
@@ -571,8 +573,10 @@ bool MainWindow::seekReplay(double time) {
         log(QStringLiteral("读取记录帧失败：") + error);
         return false;
     }
+    d->replayPreview.links=d->recording().initial.links;d->replayPreview.exclusions=d->recording().initial.exclusions;d->replayPreview.timeStep=d->recording().initial.timeStep;
     bool refreshTree = !d->replayActive;
-    if (d->replayActive)
+    if(d->replayActive && state.size()!=d->replayPreview.objects.size())refreshTree=true;
+    if (d->replayActive && state.size()==d->replayPreview.objects.size())
         for (qsizetype i = 0; i < state.size(); ++i)
             if (state[i].visible != d->replayPreview.objects[i].visible)
                 refreshTree = true;
@@ -727,6 +731,7 @@ bool MainWindow::openProject(const QString &path) {
         // Newer projects list every take; older ones carry a single "recording".
         QStringList takeKeys;
         if (j.contains("recordings")) {
+            if(!j["recordings"].isArray()){log(QStringLiteral("recordings 必须为列表"));return false;}
             const auto list = j.value("recordings").toArray();
             if (list.size() > 256) {
                 log(QStringLiteral("项目录制条数超限"));
@@ -782,37 +787,25 @@ bool MainWindow::openProject(const QString &path) {
         }
         pending.push_back(p);
     }
-    for (const auto &p : pending) {
-        if (!p.scenePath.isEmpty()) {
-            if (!openPath(p.scenePath))
-                return false;
-        } else if (!openRecording(p.recordings.first()))
-            return false;
-        auto *doc = activeDocument();
-        if (doc && !p.recordings.isEmpty()) {
-            doc->recordings.clear();
-            for (const auto &takePath : p.recordings) {
-                auto take = std::make_shared<Recording>();
-                if (!take->load(takePath, &error)) {
-                    log(error);
-                    return false;
-                }
-                take->dirty = false;
-                doc->recordings.push_back(take);
-            }
-            doc->activeRecording = 0;
-            for (int i = 0; i < int(p.recordings.size()); ++i)
-                if (p.recordings[size_t(i)] == p.recordingPath)
-                    doc->activeRecording = i;
-        }
-        if (p.replay && !p.recordings.isEmpty()) {
-            if (!seekReplay(p.time))
-                return false;
-        } else if (activeDocument()->replayActive)
-            stopReplay();
-        if (!p.name.isEmpty())
-            activeDocument()->title = p.name;
+    // Stage all documents and takes before changing the UI. Reopening a project creates
+    // independent tabs; it must never replace recordings belonging to an existing document.
+    std::vector<std::unique_ptr<Scene>> staged;
+    std::vector<std::vector<std::shared_ptr<Recording>>> takes;
+    for(const auto &p:pending){
+        auto model=std::make_unique<Scene>();std::vector<std::shared_ptr<Recording>> recordings;
+        for(const auto &takePath:p.recordings){auto take=std::make_shared<Recording>();if(!take->load(takePath,&error)){log(error);return false;}recordings.push_back(take);}
+        if(!p.scenePath.isEmpty()){if(!model->load(p.scenePath,&error)){log(error);return false;}}
+        else if(!model->loadJson(recordings.front()->initial.json(),&error)){log(error);return false;}
+        if(p.replay && !recordings.empty()){int selected=0;for(int i=0;i<p.recordings.size();++i)if(p.recordings[i]==p.recordingPath)selected=i;QVector<Object> frame;if(!recordings[size_t(selected)]->sample(p.time,frame,&error)){log(error);return false;}}
+        staged.push_back(std::move(model));takes.push_back(std::move(recordings));
     }
+    for(int i=0;i<pending.size();++i){
+        const auto &p=pending[i];addDocument(std::move(staged[size_t(i)]),{},p.name.isEmpty()?QStringLiteral("项目场景"):p.name);
+        auto *doc=activeDocument();
+        if(!takes[size_t(i)].empty()){doc->recordings=std::move(takes[size_t(i)]);doc->activeRecording=0;for(int k=0;k<p.recordings.size();++k)if(p.recordings[k]==p.recordingPath)doc->activeRecording=k;}
+        if(p.replay && !p.recordings.isEmpty() && !seekReplay(p.time))return false;
+    }
+    updateReplayUi();
     updateTitle();
     log(QStringLiteral("项目已打开：") + project.value("name").toString());
     return true;

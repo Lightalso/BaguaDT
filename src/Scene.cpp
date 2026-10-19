@@ -1,5 +1,6 @@
 #include "Scene.h"
 #include <QFile>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QQuaternion>
@@ -25,6 +26,23 @@ QMatrix4x4 Object::matrix() const {
     m.scale(scale * dimensions);
     return m;
 }
+QMatrix4x4 Object::anchorMatrix() const {
+    if (mesh && mesh->frameVertices.size() == 4) {
+        QMatrix4x4 basis;
+        auto p = mesh->positions[mesh->frameVertices[0]];
+        basis.setColumn(3, QVector4D(p, 1));
+        for (int i = 0; i < 3; ++i)
+            basis.setColumn(i, QVector4D(mesh->positions[mesh->frameVertices[i + 1]] - p, 0));
+        QMatrix4x4 scaling;
+        scaling.scale(scale);
+        return matrix() * basis * mesh->frameRestInverse * scaling;
+    }
+    QMatrix4x4 m;
+    m.translate(position);
+    m.rotate(QQuaternion::fromEulerAngles(rotation));
+    m.scale(scale);
+    return m;
+}
 static QJsonArray vec(QVector3D v) { return {v.x(), v.y(), v.z()}; }
 QJsonObject Object::json() const {
     QJsonObject result{{"id", id},
@@ -34,8 +52,8 @@ QJsonObject Object::json() const {
                        {"rotation", vec(rotation)},
                        {"scale", vec(scale)},
                        {"dimensions", vec(dimensions)},
-                       {"linearVelocity",vec(linearVelocity)},
-                       {"angularVelocity",vec(angularVelocity)},
+                       {"linearVelocity", vec(linearVelocity)},
+                       {"angularVelocity", vec(angularVelocity)},
                        {"color", color.name(QColor::HexRgb)},
                        {"visible", visible},
                        {"collisionEnabled", collisionEnabled},
@@ -43,6 +61,12 @@ QJsonObject Object::json() const {
                        {"mass", mass}};
     if (mesh)
         result.insert("mesh", mesh->id);
+    if (!anchors.isEmpty()) {
+        QJsonArray array;
+        for (const auto &anchor : anchors)
+            array.append(vec(anchor));
+        result.insert("anchors", array);
+    }
     if (deformable)
         result.insert("fem", QJsonObject{{"youngModulus", youngModulus},
                                          {"poissonRatio", poissonRatio},
@@ -52,15 +76,102 @@ QJsonObject Object::json() const {
                                          {"attachmentStiffness", attachmentStiffness}});
     return result;
 }
+bool Link::operator==(const Link &other) const {
+    return id == other.id && type == other.type && a == other.a && b == other.b && anchorA == other.anchorA &&
+           anchorB == other.anchorB && axis == other.axis && strength == other.strength && hasLimit == other.hasLimit &&
+           lower == other.lower && upper == other.upper && limitStrength == other.limitStrength &&
+           angle == other.angle && angularVelocity == other.angularVelocity && pairs == other.pairs &&
+           anchorPairs == other.anchorPairs && stiffness == other.stiffness && rest == other.rest;
+}
+QString Link::typeKey() const {
+    switch (type) {
+    case Type::Spherical:
+        return QStringLiteral("spherical");
+    case Type::Revolute:
+        return QStringLiteral("revolute");
+    case Type::Prismatic:
+        return QStringLiteral("prismatic");
+    case Type::Fixed:
+        return QStringLiteral("fixed");
+    case Type::Rotation:
+        return QStringLiteral("rotation");
+    case Type::Stitch:
+        return QStringLiteral("stitch");
+    }
+    return QStringLiteral("revolute");
+}
+bool Link::typeFromKey(const QString &key, Type &out) {
+    static const QHash<QString, Type> types{{"spherical", Type::Spherical}, {"revolute", Type::Revolute},
+                                            {"prismatic", Type::Prismatic}, {"fixed", Type::Fixed},
+                                            {"rotation", Type::Rotation},   {"stitch", Type::Stitch},
+                                            {"spring", Type::Stitch}};
+    const auto it = types.constFind(key);
+    if (it == types.cend())
+        return false;
+    out = it.value();
+    return true;
+}
+QJsonObject linkJson(const Link &link) {
+    QJsonObject result{{"id", link.id}, {"type", link.typeKey()}, {"a", link.a}, {"b", link.b}};
+    if (link.type == Link::Type::Stitch) {
+        QJsonArray pairs;
+        for (const auto &pair : link.pairs)
+            pairs.append(QJsonArray{pair.first, pair.second});
+        result.insert("pairs", pairs);
+        result.insert("stiffness", link.stiffness);
+        result.insert("rest", link.rest);
+        if (link.anchorPairs)
+            result.insert("anchorPairs", true);
+        return result;
+    }
+    result.insert("anchorA", vec(link.anchorA));
+    result.insert("anchorB", vec(link.anchorB));
+    result.insert("strength", link.strength);
+    if (link.type == Link::Type::Revolute || link.type == Link::Type::Prismatic || link.type == Link::Type::Rotation)
+        result.insert("axis", vec(link.axis));
+    if (link.hasLimit)
+        result.insert("limit",
+                      QJsonObject{{"lower", link.lower}, {"upper", link.upper}, {"strength", link.limitStrength}});
+    if (link.type == Link::Type::Rotation) {
+        result.insert("angle", link.angle);
+        result.insert("angularVelocity", link.angularVelocity);
+    }
+    return result;
+}
 class Change final : public QUndoCommand {
 public:
     Change(Scene *s, QVector<Object> before, QString selBefore, QVector<Object> after, QString selAfter, QString text)
         : s(s), before(std::move(before)), after(std::move(after)), selBefore(std::move(selBefore)),
           selAfter(std::move(selAfter)) {
+        beforeLinks = s->links;
+        afterLinks = beforeLinks;
+        beforeExclusions = s->exclusions;
+        afterExclusions = beforeExclusions;
+        auto exists = [&](const QString &id) {
+            return std::any_of(this->after.cbegin(), this->after.cend(), [&](const Object &o) { return o.id == id; });
+        };
+        afterLinks.erase(std::remove_if(afterLinks.begin(), afterLinks.end(),
+                                        [&](const Link &l) { return !exists(l.a) || !exists(l.b); }),
+                         afterLinks.end());
+        afterExclusions.erase(
+            std::remove_if(afterExclusions.begin(), afterExclusions.end(),
+                           [&](const auto &pair) { return !exists(pair.first) || !exists(pair.second); }),
+            afterExclusions.end());
+        for (auto &o : this->after)
+            if (!o.femAttachmentBody.isEmpty() && !exists(o.femAttachmentBody))
+                o.femAttachmentBody.clear();
         setText(text);
     }
-    void undo() override { apply(before, selBefore); }
-    void redo() override { apply(after, selAfter); }
+    void undo() override {
+        s->links = beforeLinks;
+        s->exclusions = beforeExclusions;
+        apply(before, selBefore);
+    }
+    void redo() override {
+        s->links = afterLinks;
+        s->exclusions = afterExclusions;
+        apply(after, selAfter);
+    }
 
 private:
     void apply(const QVector<Object> &items, const QString &id) {
@@ -70,6 +181,8 @@ private:
     }
     Scene *s;
     QVector<Object> before, after;
+    QVector<Link> beforeLinks, afterLinks;
+    QVector<QPair<QString, QString>> beforeExclusions, afterExclusions;
     QString selBefore, selAfter;
 };
 Scene::Scene(QObject *p) : QObject(p), undo(this) {}
@@ -101,6 +214,36 @@ void Scene::select(const QString &id) {
 void Scene::replace(QVector<Object> items, const QString &sel, const QString &label) {
     undo.push(new Change(this, objects, selected, std::move(items), sel, label));
 }
+namespace {
+// Links and contact exclusions are edited as a unit so undo/redo keeps them consistent.
+class LinkChange final : public QUndoCommand {
+public:
+    LinkChange(Scene *s, QVector<Link> beforeLinks, QVector<QPair<QString, QString>> beforeExclusions,
+               QVector<Link> afterLinks, QVector<QPair<QString, QString>> afterExclusions, const QString &text)
+        : s(s), beforeLinks(std::move(beforeLinks)), beforeExclusions(std::move(beforeExclusions)),
+          afterLinks(std::move(afterLinks)), afterExclusions(std::move(afterExclusions)) {
+        setText(text);
+    }
+    void undo() override { apply(beforeLinks, beforeExclusions); }
+    void redo() override { apply(afterLinks, afterExclusions); }
+
+private:
+    void apply(const QVector<Link> &links, const QVector<QPair<QString, QString>> &exclusions) {
+        s->links = links;
+        s->exclusions = exclusions;
+        s->notify();
+    }
+    Scene *s;
+    QVector<Link> beforeLinks, afterLinks;
+    QVector<QPair<QString, QString>> beforeExclusions, afterExclusions;
+};
+} // namespace
+void Scene::editLinks(const QVector<Link> &next, const QVector<QPair<QString, QString>> &nextExclusions,
+                      const QString &label) {
+    if (next == links && nextExclusions == exclusions)
+        return;
+    undo.push(new LinkChange(this, links, exclusions, next, nextExclusions, label));
+}
 QString Scene::create(Shape shape) {
     Object o;
     o.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
@@ -130,6 +273,37 @@ void Scene::removeSelected() {
             break;
         }
     replace(next, {}, QStringLiteral("删除对象"));
+}
+void Scene::removeAnchor(const QString &objectId, int index) {
+    const auto *o = find(objectId);
+    if (!o || index < 0 || index >= o->anchors.size())
+        return;
+    Object next = *o;
+    next.anchors.removeAt(index);
+    auto nextLinks = links;
+    for (auto &link : nextLinks) {
+        if (link.type != Link::Type::Stitch)
+            continue;
+        for (auto it = link.pairs.begin(); it != link.pairs.end();) {
+            bool onA = link.a == objectId, onB = link.b == objectId && link.anchorPairs;
+            if ((onA && it->first == index) || (onB && it->second == index))
+                it = link.pairs.erase(it);
+            else {
+                if (onA && it->first > index)
+                    --it->first;
+                if (onB && it->second > index)
+                    --it->second;
+                ++it;
+            }
+        }
+    }
+    nextLinks.erase(std::remove_if(nextLinks.begin(), nextLinks.end(),
+                                   [](const Link &l) { return l.type == Link::Type::Stitch && l.pairs.isEmpty(); }),
+                    nextLinks.end());
+    undo.beginMacro(QStringLiteral("删除锚点及相关缝合对"));
+    editLinks(nextLinks, exclusions, QStringLiteral("更新缝合引用"));
+    edit(next, QStringLiteral("删除锚点"));
+    undo.endMacro();
 }
 void Scene::duplicateSelected() {
     if (!current())
@@ -170,7 +344,9 @@ void Scene::finishPreview(const Object &before, const QString &label) {
     edit(after, label);
 }
 void Scene::reset(bool example) {
-    joints = {};
+    links = {};
+    exclusions = {};
+    timeStep = 1.0 / 240.0;
     objects.clear();
     selected.clear();
     undo.clear();
@@ -221,8 +397,15 @@ QJsonObject Scene::json() const {
         if (o.mesh && !assets.contains(o.mesh->id))
             assets.insert(o.mesh->id, meshJson(*o.mesh));
     }
-    return {{"format", "baguadt.scene"}, {"version", 1}, {"units", "m"}, {"upAxis", "Y"},
-            {"selected", selected},      {"view", view}, {"objects", a}, {"assets", assets}, {"joints", joints}};
+    QJsonArray linkArray;
+    for (const auto &link : links)
+        linkArray.append(linkJson(link));
+    QJsonArray exclusionArray;
+    for (const auto &pair : exclusions)
+        exclusionArray.append(QJsonObject{{"a", pair.first}, {"b", pair.second}});
+    return {{"format", "baguadt.scene"},   {"version", 1}, {"units", "m"}, {"upAxis", "Y"},    {"dt", timeStep},
+            {"selected", selected},        {"view", view}, {"objects", a}, {"assets", assets}, {"links", linkArray},
+            {"exclusions", exclusionArray}};
 }
 bool Scene::save(const QString &path, QString *error) {
     QSaveFile file(path);
@@ -328,8 +511,9 @@ bool Scene::loadJson(const QJsonObject &root, QString *error) {
             (j.contains("mass") && (!j["mass"].isDouble() || !std::isfinite(j["mass"].toDouble()) ||
                                     j["mass"].toDouble() < .001 || j["mass"].toDouble() > 1e9)))
             return fail(QStringLiteral("刚体参数不合法"));
-        if ((j.contains("linearVelocity") && !readVec("linearVelocity",o.linearVelocity,false)) ||
-            (j.contains("angularVelocity") && !readVec("angularVelocity",o.angularVelocity,false)))return fail(QStringLiteral("初始速度无效"));
+        if ((j.contains("linearVelocity") && !readVec("linearVelocity", o.linearVelocity, false)) ||
+            (j.contains("angularVelocity") && !readVec("angularVelocity", o.angularVelocity, false)))
+            return fail(QStringLiteral("初始速度无效"));
         o.collisionEnabled = j["collisionEnabled"].toBool(true);
         o.fixed = o.shape == Shape::Plane || j["fixed"].toBool(false);
         o.mass = j["mass"].toDouble(1.0);
@@ -352,6 +536,26 @@ bool Scene::loadJson(const QJsonObject &root, QString *error) {
                 o.femResolution > 6 || (fem.contains("pinBottom") && !fem.value("pinBottom").isBool()))
                 return fail(QStringLiteral("FEM 材料或网格划分参数无效"));
         }
+        if (j.contains("anchors")) {
+            const auto array = j.value("anchors").toArray();
+            if (!j.value("anchors").isArray() || array.size() > 4096)
+                return fail(QStringLiteral("锚点数量或格式无效"));
+            for (const auto &value : array) {
+                const auto point = value.toArray();
+                if (point.size() != 3)
+                    return fail(QStringLiteral("锚点坐标无效"));
+                QVector3D anchor;
+                for (int k = 0; k < 3; ++k) {
+                    const double d = point[k].toDouble(std::numeric_limits<double>::quiet_NaN());
+                    if (!std::isfinite(d) || std::abs(d) > 1e6)
+                        return fail(QStringLiteral("锚点坐标无效"));
+                    anchor[k] = float(d);
+                }
+                o.anchors.push_back(anchor);
+            }
+        }
+        if (o.deformable && !o.anchors.isEmpty())
+            return fail(QStringLiteral("虚拟锚点只能属于刚体；弹性体请引用网格顶点"));
         next.push_back(o);
     }
     const auto camera = root["view"].toObject();
@@ -366,30 +570,201 @@ bool Scene::loadJson(const QJsonObject &root, QString *error) {
             if (!camera[k].isDouble() || !std::isfinite(camera[k].toDouble()) || std::abs(camera[k].toDouble()) > 1e6)
                 return fail(QStringLiteral("相机参数无效"));
     }
-    QJsonArray nextJoints;
-    if (root.contains("joints")) {
-        if (!root["joints"].isArray()) return fail(QStringLiteral("关节列表格式错误"));
-        nextJoints=root["joints"].toArray();
-        if (nextJoints.size()>10000) return fail(QStringLiteral("关节数量超限"));
-        for (auto value:nextJoints) {
-            if (!value.isObject()) return fail(QStringLiteral("关节必须是对象"));
-            auto j=value.toObject();auto type=j["type"].toString();
-            if (type!="ball" && type!="hinge" && type!="prismatic" && type!="rotation") return fail(QStringLiteral("不支持的关节类型"));
-            QString a=j["bodyA"].toString(),b=j["bodyB"].toString();
-            if (a.isEmpty() || b.isEmpty() || a==b) return fail(QStringLiteral("关节连接对象无效"));
-            for (auto id:{a,b}) if (std::none_of(next.cbegin(),next.cend(),[&](const Object &o){return o.id==id && !o.deformable;})) return fail(QStringLiteral("关节必须引用两个已有刚体"));
-            for (auto field:QStringList{"anchor",type=="ball"?"anchor":"axis"}) {
-                auto vector=j[field].toArray();if (vector.size()!=3) return fail(QStringLiteral("关节坐标或轴无效"));
-                double length=0;for(auto v:vector){if(!v.isDouble() || !std::isfinite(v.toDouble()))return fail(QStringLiteral("关节数值无效"));length+=v.toDouble()*v.toDouble();}
-                if(field=="axis" && length<1e-20)return fail(QStringLiteral("关节轴不能为零"));
+    auto readPoint = [&](const QJsonValue &value, QVector3D &out) {
+        const auto point = value.toArray();
+        if (point.size() != 3)
+            return false;
+        for (int k = 0; k < 3; ++k) {
+            const double d = point[k].toDouble(std::numeric_limits<double>::quiet_NaN());
+            if (!std::isfinite(d) || std::abs(d) > 1e6)
+                return false;
+            out[k] = float(d);
+        }
+        return true;
+    };
+    auto findObject = [&](const QString &id) {
+        return std::find_if(next.begin(), next.end(), [&](const Object &o) { return o.id == id; });
+    };
+    double nextTimeStep = 1.0 / 240.0;
+    if (root.contains("dt")) {
+        const double value = root.value("dt").toDouble(-1);
+        if (root.value("dt").isDouble() && std::isfinite(value) && value >= 1.0 / 2000.0 && value <= 0.1)
+            nextTimeStep = value;
+        else
+            return fail(QStringLiteral("时间步长无效（应在 1/2000 至 1/10 秒之间）"));
+    }
+    QVector<Link> nextLinks;
+    if (root.contains("links")) {
+        const auto array = root.value("links").toArray();
+        if (!root.value("links").isArray() || array.size() > 2000)
+            return fail(QStringLiteral("链接列表格式错误或超过上限"));
+        QSet<QString> linkIds;
+        for (const auto &value : array) {
+            if (!value.isObject())
+                return fail(QStringLiteral("链接必须是对象"));
+            const auto j = value.toObject();
+            Link link;
+            link.id = j.value("id").toString();
+            if (link.id.isEmpty() || linkIds.contains(link.id))
+                return fail(QStringLiteral("链接 ID 为空或重复"));
+            linkIds.insert(link.id);
+            if (!Link::typeFromKey(j.value("type").toString(), link.type))
+                return fail(QStringLiteral("不支持的链接类型：") + j.value("type").toString());
+            link.a = j.value("a").toString();
+            link.b = j.value("b").toString();
+            const auto left = findObject(link.a), right = findObject(link.b);
+            if (link.a.isEmpty() || link.b.isEmpty() || link.a == link.b || left == next.end() || right == next.end())
+                return fail(QStringLiteral("链接引用的对象无效：") + link.id);
+            if (link.kinematic() && (left->deformable || right->deformable))
+                return fail(QStringLiteral("运动学关节只能连接两个刚体：") + link.id);
+            if (link.type == Link::Type::Stitch) {
+                if (!j.value("pairs").isArray() || j.value("pairs").toArray().isEmpty() ||
+                    j.value("pairs").toArray().size() > 100000)
+                    return fail(QStringLiteral("缝合链接需要顶点对：") + link.id);
+                for (const auto &pairValue : j.value("pairs").toArray()) {
+                    const auto pair = pairValue.toArray();
+                    if (pair.size() != 2 || !pair[0].isDouble() || !pair[1].isDouble())
+                        return fail(QStringLiteral("缝合顶点对无效：") + link.id);
+                    const int ai = pair[0].toInt(-1), bi = pair[1].toInt(-1);
+                    if (ai < 0 || ai >= left->anchors.size())
+                        return fail(QStringLiteral("缝合链接的锚点序号越界：") + link.id);
+                    if (bi < 0)
+                        return fail(QStringLiteral("缝合链接的顶点序号无效：") + link.id);
+                    link.pairs.push_back({ai, bi});
+                }
+                if (j.contains("anchorPairs") && !j.value("anchorPairs").isBool())
+                    return fail(QStringLiteral("anchorPairs 必须为布尔值"));
+                link.anchorPairs = j.value("anchorPairs").toBool(false);
+                if (left->deformable || (link.anchorPairs && right->deformable))
+                    return fail(QStringLiteral("缝合锚点必须属于刚体"));
+                if (!link.anchorPairs) {
+                    if(!right->deformable)return fail(QStringLiteral("刚体之间的缝合请使用两侧锚点模式；网格顶点模式仅用于弹性体"));
+                    int count = right->mesh ? int(right->mesh->positions.size())
+                                            : (right->deformable && right->shape == Shape::Box
+                                                   ? (right->femResolution + 1) * (right->femResolution + 1) *
+                                                         (right->femResolution + 1)
+                                                   : 0);
+                    for (const auto &pair : link.pairs)
+                        if (pair.second >= count)
+                            return fail(QStringLiteral("缝合目标顶点越界或没有明确的顶点拓扑"));
+                }
+                if (link.anchorPairs)
+                    for (const auto &pair : link.pairs)
+                        if (pair.second >= right->anchors.size())
+                            return fail(QStringLiteral("缝合链接的另一侧锚点序号越界：") + link.id);
+                link.stiffness = j.value("stiffness").toDouble(0);
+                link.rest = j.value("rest").toDouble(0);
+                if (!j.value("stiffness").isDouble() || !std::isfinite(link.stiffness) || link.stiffness <= 0 ||
+                    (j.contains("rest") && !j["rest"].isDouble()) || !std::isfinite(link.rest) || link.rest < 0)
+                    return fail(QStringLiteral("缝合刚度或静止长度无效：") + link.id);
+                nextLinks.push_back(link);
+                continue;
             }
-            if (j.contains("strength") && (!j["strength"].isDouble() || !std::isfinite(j["strength"].toDouble()) || j["strength"].toDouble()<=0)) return fail(QStringLiteral("关节强度无效"));
-            if (j.contains("angleDegrees") && (!j["angleDegrees"].isDouble() || !std::isfinite(j["angleDegrees"].toDouble()))) return fail(QStringLiteral("旋转约束角度无效"));
-            if (j.contains("angularVelocityDegrees") && (!j["angularVelocityDegrees"].isDouble() || !std::isfinite(j["angularVelocityDegrees"].toDouble()))) return fail(QStringLiteral("旋转约束角速度无效"));
+            if (!readPoint(j.value("anchorA"), link.anchorA) || !readPoint(j.value("anchorB"), link.anchorB))
+                return fail(QStringLiteral("链接锚点无效：") + link.id);
+            link.strength = j.value("strength").toDouble(100);
+            if ((j.contains("strength") && !j["strength"].isDouble()) || !std::isfinite(link.strength) ||
+                link.strength <= 0)
+                return fail(QStringLiteral("链接强度无效：") + link.id);
+            if (link.type == Link::Type::Revolute || link.type == Link::Type::Prismatic ||
+                link.type == Link::Type::Rotation) {
+                if (!readPoint(j.value("axis"), link.axis) || link.axis.lengthSquared() < 1e-12f)
+                    return fail(QStringLiteral("链接轴无效：") + link.id);
+            }
+            if (j.contains("limit")) {
+                if (link.type != Link::Type::Prismatic && link.type != Link::Type::Revolute)
+                    return fail(QStringLiteral("该链接类型不支持限位"));
+                const auto limit = j.value("limit").toObject();
+                link.lower = limit.value("lower").toDouble(0);
+                link.upper = limit.value("upper").toDouble(0);
+                link.limitStrength = limit.value("strength").toDouble(100);
+                if (!limit.value("lower").isDouble() || !limit.value("upper").isDouble() ||
+                    !std::isfinite(link.lower) || !std::isfinite(link.upper) || link.lower >= link.upper ||
+                    (limit.contains("strength") && !limit["strength"].isDouble()) ||
+                    !std::isfinite(link.limitStrength) || link.limitStrength <= 0)
+                    return fail(QStringLiteral("链接限位无效：") + link.id);
+                link.hasLimit = true;
+            }
+            if (link.type == Link::Type::Rotation) {
+                link.angle = j.value("angle").toDouble(0);
+                link.angularVelocity = j.value("angularVelocity").toDouble(0);
+                if ((j.contains("angle") && !j["angle"].isDouble()) ||
+                    (j.contains("angularVelocity") && !j["angularVelocity"].isDouble()) || !std::isfinite(link.angle) ||
+                    !std::isfinite(link.angularVelocity))
+                    return fail(QStringLiteral("转动约束参数无效：") + link.id);
+            }
+            nextLinks.push_back(link);
+        }
+    } else if (root.contains("joints")) {
+        // Version-1 scenes stored joints with world-space anchors and four legacy type names.
+        if (!root.value("joints").isArray())
+            return fail(QStringLiteral("关节列表格式错误"));
+        const auto array = root.value("joints").toArray();
+        if (array.size() > 2000)
+            return fail(QStringLiteral("关节列表格式错误"));
+        for (const auto &value : array) {
+            if (!value.isObject())
+                return fail(QStringLiteral("关节必须是对象"));
+            const auto j = value.toObject();
+            Link link;
+            const QString type = j.value("type").toString();
+            const QHash<QString, Link::Type> legacy{{"ball", Link::Type::Spherical},
+                                                    {"hinge", Link::Type::Revolute},
+                                                    {"prismatic", Link::Type::Prismatic},
+                                                    {"rotation", Link::Type::Rotation}};
+            if (!legacy.contains(type))
+                return fail(QStringLiteral("不支持的关节类型"));
+            link.type = legacy.value(type);
+            link.id = j.value("id").toString();
+            link.a = j.value("bodyA").toString();
+            link.b = j.value("bodyB").toString();
+            const auto left = findObject(link.a), right = findObject(link.b);
+            if (link.a.isEmpty() || link.b.isEmpty() || link.a == link.b || left == next.end() || right == next.end() ||
+                left->deformable || right->deformable)
+                return fail(QStringLiteral("关节连接对象无效"));
+            if (link.id.isEmpty())
+                link.id = link.a + "-" + link.b;
+            QVector3D worldAnchor;
+            if (!readPoint(j.value("anchor"), worldAnchor))
+                return fail(QStringLiteral("关节坐标无效"));
+            // v1 anchors were world-space; store them body-local so the link survives moves.
+            const auto inverse = left->anchorMatrix().inverted();
+            link.anchorA = inverse.map(worldAnchor);
+            link.anchorB = right->anchorMatrix().inverted().map(worldAnchor);
+            if (!readPoint(j.value("axis"), link.axis) || link.axis.lengthSquared() < 1e-12f)
+                return fail(QStringLiteral("关节轴无效"));
+            link.strength = j.value("strength").toDouble(100);
+            if ((j.contains("strength") && !j["strength"].isDouble()) || !std::isfinite(link.strength) ||
+                link.strength <= 0)
+                return fail(QStringLiteral("关节强度无效"));
+            if (link.type == Link::Type::Rotation) {
+                const double deg = j.value("angleDegrees").toDouble(0);
+                const double speed = j.value("angularVelocityDegrees").toDouble(0);
+                if (!std::isfinite(deg) || !std::isfinite(speed))
+                    return fail(QStringLiteral("旋转约束参数无效"));
+                link.angle = deg * 3.14159265358979323846 / 180.0;
+                link.angularVelocity = speed * 3.14159265358979323846 / 180.0;
+            }
+            nextLinks.push_back(link);
+        }
+    }
+    QVector<QPair<QString, QString>> nextExclusions;
+    if (root.contains("exclusions")) {
+        const auto array = root.value("exclusions").toArray();
+        if (!root.value("exclusions").isArray() || array.size() > 10000)
+            return fail(QStringLiteral("接触排除列表格式错误"));
+        for (const auto &value : array) {
+            const auto j = value.toObject();
+            const QString a = j.value("a").toString(), b = j.value("b").toString();
+            if (a.isEmpty() || b.isEmpty() || a == b || findObject(a) == next.end() || findObject(b) == next.end())
+                return fail(QStringLiteral("接触排除引用的对象无效"));
+            nextExclusions.push_back({a, b});
         }
     }
     objects = std::move(next);
-    joints = nextJoints;
+    links = nextLinks;
+    exclusions = nextExclusions;
+    timeStep = nextTimeStep;
     view = camera;
     selected = root["selected"].toString();
     if (!find(selected))

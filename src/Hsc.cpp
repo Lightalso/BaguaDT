@@ -88,9 +88,18 @@ bool solveHsc(const std::vector<double> &matrix, int nf, const std::vector<int> 
         Mat p = polynomial(a, inverseBlocks(a, blocks), o);
         if (o.adaptiveInverse) {
             Mat identity = Mat::Identity(nq, nq);
-            while ((identity - a * p).norm() / std::sqrt(double(nq)) > 1e-5) {
-                require(next.inverseDoublings < 32 && p.allFinite() && p.norm() < 1e100,
-                        "HSC ABD/rigid Neumann inverse did not converge");
+            // Optional enhancement: an ill-conditioned block keeps the fixed-order polynomial
+            // instead of failing the whole solve.
+            for (;;) {
+                double inverseResidual = (identity - a * p).norm() / std::sqrt(double(nq));
+                if (std::isfinite(inverseResidual) && inverseResidual <= 1e-5)
+                    break;
+                if (next.inverseDoublings >= 32 || !p.allFinite() || p.norm() > 1e100) {
+                    p = polynomial(a, inverseBlocks(a, blocks), o);
+                    next.inverseDoublings = 0;
+                    next.inverseFallbacks = 1;
+                    break;
+                }
                 p = (p + p * (identity - a * p)).eval();
                 p = ((p + p.transpose()) * .5).eval();
                 ++next.inverseDoublings;

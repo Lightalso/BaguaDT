@@ -275,6 +275,30 @@ QPointF Viewport::project(QVector3D world, bool *visible) const {
         return {-10000, -10000};
     return {(p.x() / p.w() + 1) * width() / 2, (1 - p.y() / p.w()) * height() / 2};
 }
+QVector3D Viewport::pickPoint(QPointF p, QString *objectId) const {
+    auto inv = vp().inverted();
+    float x = 2 * float(p.x()) / width() - 1, y = 1 - 2 * float(p.y()) / height();
+    auto near = inv * QVector4D(x, y, -1, 1), far = inv * QVector4D(x, y, 1, 1);
+    auto origin = near.toVector3DAffine(), dir = (far.toVector3DAffine() - origin).normalized();
+    float closest = std::numeric_limits<float>::infinity();
+    QString id;
+    for (const auto &o : scene->objects)
+        if (o.visible) {
+            float d = intersect(o, origin, dir);
+            if (d < closest) {
+                closest = d;
+                id = o.id;
+            }
+        }
+    if (objectId)
+        *objectId = id;
+    return std::isfinite(closest) ? origin + dir * closest : origin + dir * distance;
+}
+void Viewport::setAnchorHighlight(const QString &objectId, int anchor) {
+    highlightObject = objectId;
+    highlightAnchor = anchor;
+    update();
+}
 QString Viewport::pick(QPointF p) const {
     auto inv = vp().inverted();
     float x = 2 * float(p.x()) / width() - 1, y = 1 - 2 * float(p.y()) / height();
@@ -365,6 +389,68 @@ void Viewport::drawOverlay(QPainter &p) {
             p.setPen(QPen(c, 1));
             p.drawLine(x, y);
         }
+    }
+    if (showLinks) {
+        // Anchors and link axes are projected from world coordinates, so they follow both the
+        // camera and the running preview.
+        for (const auto &link : scene->links) {
+            const Object *a = scene->find(link.a), *b = scene->find(link.b);
+            if (!a || !b)
+                continue;
+            const auto wa = a->anchorMatrix().map(link.anchorA), wb = b->anchorMatrix().map(link.anchorB);
+            bool v1, v2;
+            const auto pa = project(wa, &v1), pb = project(wb, &v2);
+            if (!link.kinematic()) {
+                p.setPen(QPen(QColor("#7a5cff"),1.4,Qt::DotLine));
+                for(auto pair:link.pairs){
+                    if(pair.first<0 || pair.first>=a->anchors.size())continue;
+                    QVector3D target;
+                    if(link.anchorPairs){if(pair.second<0 || pair.second>=b->anchors.size())continue;target=b->anchorMatrix().map(b->anchors[pair.second]);}
+                    else{if(!b->mesh || pair.second<0 || pair.second>=b->mesh->positions.size())continue;target=b->matrix().map(b->mesh->positions[pair.second]);}
+                    bool va,vb;auto from=project(a->anchorMatrix().map(a->anchors[pair.first]),&va),to=project(target,&vb);if(va && vb)p.drawLine(from,to);
+                }
+                continue;
+            }
+            if (v1 && v2) {
+                QColor c("#d05a3a");
+                c.setAlpha(130);
+                p.setPen(QPen(c, 1.2, Qt::DashLine));
+                p.drawLine(pa, pb);
+                p.drawEllipse(pa,4,4);p.drawEllipse(pb,3,3);
+            }
+            if (link.type != Link::Type::Spherical && link.type != Link::Type::Fixed) {
+                auto direction=link.axis;
+                if(a->mesh && a->mesh->frameVertices.size()==4)direction=a->anchorMatrix().mapVector(QQuaternion::fromEulerAngles(a->rotation).conjugated().rotatedVector(direction)/a->scale);
+                const auto dir = direction.normalized() * .25f;
+                bool v3, v4;
+                const auto a0 = project(wa - dir, &v3), a1 = project(wa + dir, &v4);
+                if (v3 && v4) {
+                    p.setPen(QPen(QColor("#c0392b"), 2));
+                    p.drawLine(a0, a1);
+                }
+            }
+        }
+        for (const auto &o : scene->objects) {
+            if (!o.visible)
+                continue;
+            for (int i = 0; i < o.anchors.size(); ++i) {
+                bool visible;
+                const auto s = project(o.anchorMatrix().map(o.anchors[i]), &visible);
+                if (!visible)
+                    continue;
+                const bool hot = o.id == highlightObject && i == highlightAnchor;
+                p.setPen(QPen(QColor("#12503a"), 1.2));
+                p.setBrush(hot ? QColor("#ffd166") : QColor("#4cd4a0"));
+                const qreal r = hot ? 5.5 : 3.5;
+                p.drawEllipse(s, r, r);
+                if (o.id == scene->selected) {
+                    p.setBrush(Qt::NoBrush);
+                    p.setPen(QPen(QColor("#173042"), 1));
+                    p.drawText(s + QPointF(6, -6), QString::number(i));
+                }
+            }
+        }
+        p.setBrush(Qt::NoBrush);
     }
     if (auto *o = scene->current(); o && o->visible) {
         std::array<QVector3D, 8> corners;
@@ -484,12 +570,17 @@ void Viewport::mousePressEvent(QMouseEvent *e) {
         return;
     }
     if (e->button() == Qt::LeftButton) {
-        activeAxis = hitHandle(e->position());
+        activeAxis = anchorPicking ? -1 : hitHandle(e->position());
         if (activeAxis >= 0 && scene->current()) {
             beforeDrag = *scene->current();
             grabMouse();
-        } else
-            scene->select(pick(e->position()));
+        } else {
+            QString hit;
+            auto world = pickPoint(e->position(), &hit);
+            if(anchorPicking){double best=64.;for(const auto &o:scene->objects)if(o.visible)for(auto a:o.anchors){bool visible;auto wp=o.anchorMatrix().map(a);auto screen=project(wp,&visible);auto delta=screen-e->position();double d=QPointF::dotProduct(delta,delta);if(visible && d<best){best=d;world=wp;hit=o.id;}}}
+            scene->select(hit);
+            emit clicked(world, hit);
+        }
         update();
     }
 }
@@ -609,6 +700,7 @@ void Viewport::keyPressEvent(QKeyEvent *e) {
     if (e->key() == Qt::Key_Escape) {
         stopCameraNavigation();
         cancelDrag();
+        emit cancelled();
         return;
     }
     if (cameraButton == Qt::RightButton) {

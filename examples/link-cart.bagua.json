@@ -1,0 +1,399 @@
+{
+  "format": "baguadt.scene",
+  "version": 1,
+  "units": "m",
+  "upAxis": "Y",
+  "dt": 0.004166666666666667,
+  "selected": "chassis",
+  "view": {
+    "target": [
+      0,
+      0.35,
+      0
+    ],
+    "yaw": 32,
+    "pitch": 18,
+    "distance": 3.2,
+    "grid": true
+  },
+  "objects": [
+    {
+      "id": "ground",
+      "name": "地面",
+      "shape": "plane",
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "dimensions": [
+        6,
+        1,
+        6
+      ],
+      "color": "#d8dfe5",
+      "visible": true,
+      "fixed": true,
+      "collisionEnabled": true,
+      "mass": 1
+    },
+    {
+      "id": "chassis",
+      "name": "车架 · 双轮悬架",
+      "shape": "box",
+      "position": [
+        0,
+        0.65,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "dimensions": [
+        1.2,
+        0.2,
+        0.5
+      ],
+      "linearVelocity": [
+        0,
+        0,
+        0
+      ],
+      "angularVelocity": [
+        0,
+        0,
+        0
+      ],
+      "color": "#53b8b0",
+      "visible": true,
+      "fixed": false,
+      "collisionEnabled": true,
+      "mass": 20,
+      "anchors": [
+        [
+          -0.45,
+          -0.1,
+          0
+        ],
+        [
+          0.45,
+          -0.1,
+          0
+        ]
+      ]
+    },
+    {
+      "id": "spindle-left",
+      "name": "左侧转向节",
+      "shape": "box",
+      "position": [
+        -0.45,
+        0.4,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "dimensions": [
+        0.1,
+        0.1,
+        0.1
+      ],
+      "color": "#8f9aa6",
+      "visible": true,
+      "fixed": false,
+      "collisionEnabled": true,
+      "mass": 2,
+      "anchors": [
+        [
+          0,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "id": "wheel-left",
+      "name": "左轮",
+      "shape": "box",
+      "position": [
+        -0.45,
+        0.2,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "dimensions": [
+        0.4,
+        0.3,
+        0.4
+      ],
+      "color": "#e5ad63",
+      "visible": true,
+      "fixed": false,
+      "collisionEnabled": true,
+      "mass": 5,
+      "anchors": [
+        [
+          0,
+          0.15,
+          0
+        ]
+      ]
+    },
+    {
+      "id": "spindle-right",
+      "name": "右侧转向节",
+      "shape": "box",
+      "position": [
+        0.45,
+        0.4,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "dimensions": [
+        0.1,
+        0.1,
+        0.1
+      ],
+      "color": "#8f9aa6",
+      "visible": true,
+      "fixed": false,
+      "collisionEnabled": true,
+      "mass": 2,
+      "anchors": [
+        [
+          0,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "id": "wheel-right",
+      "name": "右轮",
+      "shape": "box",
+      "position": [
+        0.45,
+        0.2,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "dimensions": [
+        0.4,
+        0.3,
+        0.4
+      ],
+      "color": "#e5ad63",
+      "visible": true,
+      "fixed": false,
+      "collisionEnabled": true,
+      "mass": 5,
+      "anchors": [
+        [
+          0,
+          0.15,
+          0
+        ]
+      ]
+    }
+  ],
+  "links": [
+    {
+      "id": "guide-left",
+      "type": "prismatic",
+      "a": "chassis",
+      "b": "spindle-left",
+      "anchorA": [
+        -0.45,
+        -0.1,
+        0
+      ],
+      "anchorB": [
+        0,
+        0,
+        0
+      ],
+      "axis": [
+        0,
+        1,
+        0
+      ],
+      "strength": 100000,
+      "limit": {
+        "lower": -0.1,
+        "upper": 0.1,
+        "strength": 100
+      }
+    },
+    {
+      "id": "spring-left",
+      "type": "stitch",
+      "a": "chassis",
+      "b": "spindle-left",
+      "pairs": [
+        [
+          0,
+          0
+        ]
+      ],
+      "anchorPairs": true,
+      "stiffness": 20000,
+      "rest": 0.15
+    },
+    {
+      "id": "hub-left",
+      "type": "revolute",
+      "a": "spindle-left",
+      "b": "wheel-left",
+      "anchorA": [
+        0,
+        0,
+        0
+      ],
+      "anchorB": [
+        0,
+        0.15,
+        0
+      ],
+      "axis": [
+        0,
+        1,
+        0
+      ],
+      "strength": 100000
+    },
+    {
+      "id": "guide-right",
+      "type": "prismatic",
+      "a": "chassis",
+      "b": "spindle-right",
+      "anchorA": [
+        0.45,
+        -0.1,
+        0
+      ],
+      "anchorB": [
+        0,
+        0,
+        0
+      ],
+      "axis": [
+        0,
+        1,
+        0
+      ],
+      "strength": 100000,
+      "limit": {
+        "lower": -0.1,
+        "upper": 0.1,
+        "strength": 100
+      }
+    },
+    {
+      "id": "spring-right",
+      "type": "stitch",
+      "a": "chassis",
+      "b": "spindle-right",
+      "pairs": [
+        [
+          1,
+          0
+        ]
+      ],
+      "anchorPairs": true,
+      "stiffness": 20000,
+      "rest": 0.15
+    },
+    {
+      "id": "hub-right",
+      "type": "revolute",
+      "a": "spindle-right",
+      "b": "wheel-right",
+      "anchorA": [
+        0,
+        0,
+        0
+      ],
+      "anchorB": [
+        0,
+        0.15,
+        0
+      ],
+      "axis": [
+        0,
+        1,
+        0
+      ],
+      "strength": 100000
+    }
+  ],
+  "exclusions": [
+    {
+      "a": "chassis",
+      "b": "spindle-left"
+    },
+    {
+      "a": "chassis",
+      "b": "spindle-right"
+    },
+    {
+      "a": "spindle-left",
+      "b": "wheel-left"
+    },
+    {
+      "a": "spindle-right",
+      "b": "wheel-right"
+    }
+  ]
+}

@@ -44,8 +44,22 @@ $backend = if ($EditorOnly) { 'OFF' } else { 'ON' }
 $configure = @('-S','.','-B',$BuildDirectory,'-G','Ninja',"-DCMAKE_MAKE_PROGRAM=$ninja",'-DCMAKE_BUILD_TYPE=Release','-DCMAKE_TRY_COMPILE_CONFIGURATION=Release',"-DCMAKE_PREFIX_PATH=$QtRoot;$chronoInstall", "-DCMAKE_CUDA_COMPILER=$CudaRoot/bin/nvcc.exe", "-DCMAKE_CUDA_ARCHITECTURES=$CudaArchitectures", "-DBAGUA_ENABLE_CUDA=$backend", "-DBAGUA_ENABLE_CHRONO=$backend",'-DBUILD_TESTING=ON')
 $configure += "-DBAGUA_EIGEN_INCLUDE=$EigenRoot"
 if ($Sanitize) { $configure += '-DBAGUA_SANITIZE=ON' }
-if ($Fresh) { $configure = @('--fresh') + $configure }
+$repairDependencies = $false
+$cacheRoot = Join-Path $BuildDirectory 'CMakeFiles'
+if (Test-Path $cacheRoot) {
+    # Old caches created under a different console encoding can miss every header dependency.
+    # Refreshing CMake alone cannot repair already stale object files, so clean those as well.
+    foreach ($compilerCache in (Get-ChildItem -LiteralPath $cacheRoot -Filter 'CMakeCXXCompiler.cmake' -Recurse)) {
+        $cachedCompiler = Get-Content -LiteralPath $compilerCache.FullName -Raw -Encoding UTF8
+        if ($cachedCompiler -match 'SHOWINCLUDES_PREFIX[^\r\n]*(娉ㄦ|鍖呭|�)') { $repairDependencies = $true }
+    }
+}
+if ($Fresh -or $repairDependencies) { $configure = @('--fresh') + $configure }
 Invoke-Checked $cmake $configure
+if ($repairDependencies) {
+    Write-Host 'Repairing an obsolete MSVC include-prefix cache; rebuilding all application objects.'
+    Invoke-Checked $cmake @('--build',$BuildDirectory,'--target','clean')
+}
 Invoke-Checked $cmake @('--build',$BuildDirectory,'--parallel','6')
 if (Test-Path "$chronoInstall\bin") { Get-ChildItem "$chronoInstall\bin" -Filter '*.dll' | Copy-Item -Destination $BuildDirectory }
 $nativeRuntime = Join-Path $projectRoot '.deps\hsc-native\build\Release\bin'
@@ -63,10 +77,19 @@ if ($Package) {
     Invoke-Checked "$QtRoot\bin\windeployqt.exe" @('--release','--no-translations','--no-system-d3d-compiler','dist\BaguaDT\BaguaDT.exe')
     Copy-Item examples dist\BaguaDT -Recurse -Force
     Copy-Item README.md,LICENSE,THIRD_PARTY_NOTICES.md dist\BaguaDT
-    Copy-Item scripts\OpenHSC.cmd,scripts\OpenHSCCoupled.cmd,scripts\OpenHSCNative.cmd dist\BaguaDT
+    Copy-Item scripts\OpenHSC.cmd,scripts\OpenHSCCoupled.cmd,scripts\OpenHSCNative.cmd,scripts\OpenAssembly.cmd dist\BaguaDT
     Copy-Item docs dist\BaguaDT -Recurse -Force
     New-Item -ItemType Directory -Force dist\BaguaDT\licenses | Out-Null
-    Copy-Item licenses\* dist\BaguaDT\licenses
+    Copy-Item licenses\* dist\BaguaDT\licenses -Recurse -Force
+    $nativeLicenses=Join-Path $projectRoot '.deps/hsc-native/build/vcpkg_installed/x64-windows/share'
+    if(Test-Path $nativeLicenses){
+        $noticeFolder=Join-Path $projectRoot 'dist/BaguaDT/licenses/hsc-dependencies'
+        New-Item -ItemType Directory -Force $noticeFolder | Out-Null
+        Get-ChildItem -LiteralPath $nativeLicenses -Directory | ForEach-Object {
+            $copyright=Join-Path $_.FullName 'copyright'
+            if(Test-Path $copyright){Copy-Item -LiteralPath $copyright -Destination (Join-Path $noticeFolder ($_.Name+'-copyright.txt'))}
+        }
+    }
     if (Test-Path "$ChronoSource\LICENSE") { Copy-Item "$ChronoSource\LICENSE" dist\BaguaDT\licenses\Chrono-LICENSE }
     Get-ChildItem $EigenRoot -Filter 'COPYING*' | Copy-Item -Destination dist\BaguaDT\licenses
     if (Test-Path "$QtRoot\licenses") { Copy-Item "$QtRoot\licenses" dist\BaguaDT -Recurse -Force }

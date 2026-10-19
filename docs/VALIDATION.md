@@ -1,8 +1,30 @@
+# 最新审计验证（2026-10-19）
+
+- 完整 C++ / CUDA / Chrono 构建：**48 passed / 0 failed / 0 skipped**，包含故意制造求解失败的恢复测试。
+- 编辑器独立构建：**31 passed / 0 failed / 17 skipped**；跳过项均依赖物理后端。旧构建缓存的中文 include 前缀乱码已被构建脚本自动识别并清理，新建构建目录也独立验证通过。
+- MSVC AddressSanitizer 编辑器构建：**31 passed / 0 failed / 17 skipped**。用于检查装配交互与项目打开路径的内存访问。
+- 新增覆盖：删除物体/锚点时引用完整性及撤销、连续新建同类型链接、限位表单、缩放/旋转物体的锚点拾取、完整仿射锚点坐标的记录重开、Chrono 的场景 dt、项目重开不覆盖已有文档。
+- 打包版在仅含 Windows 系统目录的 PATH 下，以现有 INI 的自适应逆设置运行双轮悬架 480 步（2 秒物理时间），成功保存 481 帧记录。另以 `--play --capture` 检查定时器运行路径与装配显示。
+
+主要证据：`artifacts-audit-final-build.log`、`artifacts-audit-editor-repaired.log`、`artifacts-audit-editor-clean.log`、`artifacts-audit-final-asan.log`、`artifacts-audit-cart.log`，以及 `artifacts/audit-cart.brec`。细节和边界见 [审计报告](AUDIT_2026-10-19.md)。
+
+复现：
+
+```powershell
+.\scripts\BuildHscNative.ps1 -BuildOnly
+.\scripts\Build.ps1 -Package
+.\scripts\Build.ps1 -EditorOnly -BuildDirectory build-editor
+.\scripts\Build.ps1 -EditorOnly -Sanitize -BuildDirectory build-audit-asan
+.\dist\BaguaDT\BaguaDT.exe .\examples\link-cart.bagua.json --hsc on --record .\artifacts\cart.brec --simulate-steps 480
+```
+
+以下为各历史阶段的验证记录，数量与范围以各段的时间为准。
+
 # BaguaDT 验证记录
 
 ## Demo 0.3 当前验证：原生 HSC 后端
 
-验证日期：2026-10-19。完整 C++ / CUDA / Chrono / libuipc 构建、CTest 与打包通过：**35 passed / 0 failed / 0 skipped**。
+验证日期：2026-10-19。完整 C++ / CUDA / Chrono / libuipc 构建、CTest 与打包通过：**39 passed / 0 failed / 0 skipped**。
 
 - 物理开关替换整套物理模块：关闭时使用 Chrono NSC / SMC 链，开启时使用原生 libuipc 后端（12 自由度 ABD、四面体 FEM、IPC 接触与 CCD、Newton、CUDA HSC）。
 - 原生自由落体位移与解析值一致，且运行时未修改编辑场景；HSC 统计（CUDA、调用次数、收敛）随每步更新。
@@ -13,12 +35,17 @@
 - 录制面板新增「▶● 模拟并录制」与「离线高质量」：一次点击即可启动物理系统并开始录制，录制中该按钮禁用；离线模式下每帧恰好推进一个物理步，导出记录逐帧检查帧间距都等于 1/240 s（容差 1e-9 s），元数据 `sampling` 为 `lock-step fixed timestep`。
 - 录制列表：同一场景连续录两条，列表出现两行且默认选中新记录（帧数分别为 5 与 4）；`selectRecordingAt(0)` 切换后帧数随之变化并可进入回放；先单独保存第一条、再删除它，列表与计数降为 1，剩余记录仍可单独保存，两个 `.brec` 重新载入后帧数与内容各自正确。
 - 便携项目带上多条记录：手工构造 `recordings: [take1.brec, take2.brec]` 的项目后打开，列表显示「记录 1 · 91 帧 · 0.375 s」与「记录 2 · 241 帧 · 1.000 s」，`recording` 指定的第二条被选中，状态栏显示「记录 2/2 · 帧 97 / 241」，时间轴按 0.4 s 定位。
+- 装配前置能力：`femAbdStitchCarriesLoad` 用固定 FEM 底座吊起自由 ABD 配重，240 步后停在 0.1915 m（静止长度 0.1905 m，拉伸 1.0 mm = 19.62 N ÷ 20000 N/m），证明 FEM↔ABD 软缝合确实传递载荷；这是车辆胎唇连接与悬架弹簧的基础。
+- 连接表达（场景格式）：`linkModelPersistenceAndValidation` 对五类链接（球铰 / 转动副 / 移动副 / 固定副 / 缝合）做保存-载入往返，逐字段比对锚点、轴、强度、限位区间、缝合对与 `anchorPairs`；8 类非法输入（未知类型、缺少对象、自连接、限位上下界颠倒、零轴、`dt` 越界、运动学关节连到变形体、缝合锚点越界）全部被拒绝且不覆盖当前场景；旧的 `joints`（世界锚点、`ball/hinge` 命名）自动转换为 `links`，世界锚点按刚体姿态换算为体坐标（`(0,1.5,0)` → `(0,-0.5,0)` / `(0,0.5,0)`）。
+- 原生装配构建：`nativeArticulatedSuspension` 用固定底座 → 移动副（限位 ±0.15 m）→ 弹簧缝合（k=20000 N/m，rest=0.3 m）→ 转动副挂轮组成微型悬架，场景 `dt=1/120`。240 步后 Newton 收敛，导柱行程 −0.0505 m（设计 −0.05）、弹簧误差 0.49 mm、轮心 0.2995 m（设计 0.299），诊断接口返回三条链接的行程 / 角度 / 缝合误差。
+- 部件对接触排除：`nativeContactExclusionAllowsOverlap` 让两个重叠 0.1 m 的刚体带排除启动，60 步收敛、接触数 0、本体不位移；同一场景去掉排除后 libuipc 直接拒绝世界（探针 `--shape overlap` 对照：`refused -> HSC world initialization failed`）。这是车辆内部重叠代理能装配的前提。
+- 装配示例（`examples/link-cart.bagua.json`）：车架 + 2 转向节 + 2 车轮，6 条链接（2 移动副带 ±0.1 m 限位、2 弹簧缝合 rest=0.15 m、2 转动副）与 4 对接触排除；在编辑器里开启 HSC 推进 240 步到 1.000 s，每步收敛，车轮落在地面上、车架由弹簧支撑（几何上部件之间无接触路径，载荷只能经关节与弹簧传递）。
 - 命令行批量录制（原生后端，1 s 物理时间）：`--record run.brec --simulate-steps 240` 得到 241 帧、时长 1.000 s，逐帧检查帧间距恒为 1/240 s（最大偏差 1e-16 s），元数据 `sampling` 为 `lock-step fixed timestep`；实际耗时远长于 1 s，即用更长的时间换取等间距采样。重新打开该记录并定位到 0.550 s 时显示第 133 / 241 帧。
 - 立方体 / 球 / 圆柱表面封闭且无退化三角形；球的两极与经线接缝、圆柱的侧面接缝需要精确合并，否则 ABD 无法建立体积。
 - 实际打开两个示例并推进：`hsc-coupled` 到 2.000 s，HSC 秩 3、r ≈ 2.4e-3，弹性盒在连接球处可见下陷；`hsc-native-contact` 到 2.500 s，HSC 秩 9、r ≈ 2.2e-3，落体在基座上压出凹坑。截图见 `artifacts/native-coupled.png` 与 `artifacts/native-contact.png`。
 - 原有 Chrono 测试继续通过：圆柱静置、缩放旋转碰撞体、自由落体与接触、关节映射到 Chrono 链、HSC 与 SparseLU 对照（480 步，耦合秩 3，相对残差约 1.63e-10）、录制回放、页签、编辑与拾取。
 
-测试输出为 `artifacts-hsc-gpu-build.log` 与 `artifacts-hsc-native-incremental.log`。本版的限制见 [HSC 接入说明](HSC_INTEGRATION.md)：线性系统仍是隐式 Euler 增量系统，接触刚度受自适应通道限制，关节没有编辑界面，也没有与论文同规模模型的性能基准。
+测试输出为 `artifacts-hsc-gpu-build.log` 与 `artifacts-hsc-native-incremental.log`。本版的限制见 [HSC 接入说明](HSC_INTEGRATION.md)：接触刚度受自适应通道限制，也没有与论文同规模模型的性能基准。当前装配界面与范围见审计报告。
 
 ## Demo 0.3 历史验证：Chrono HSC 适配
 

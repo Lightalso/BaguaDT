@@ -15,6 +15,7 @@ struct HscStats {
     double ccdStep = 1;
     int nonzeros = 0, factorNonzeros = 0;
     int calls = 0, rank = 0, iterations = 0, corrections = 0, inverseDoublings = 0;
+    int inverseFallbacks = 0;
     double relativeResidual = 0, acaResidual = 0, asymmetry = 0, milliseconds = 0;
 };
 }

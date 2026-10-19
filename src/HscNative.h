@@ -11,7 +11,9 @@ public:
     bool start(const Scene &source,Scene &preview,const HscOptions &options,QString *error);
     bool step(int count,Scene &preview,QString *error);
     double time() const;
+    double stepSize() const;
     HscStats stats() const;
+    QVector<LinkStat> linkStats() const;
 private:
     struct Impl;std::unique_ptr<Impl> impl;
 };

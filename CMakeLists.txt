@@ -15,7 +15,7 @@ add_library(bagua_editor STATIC
     src/Viewport.cpp src/Viewport.h src/MainWindow.cpp src/MainWindow.h
     src/Backends.cpp src/Backends.h src/Physics.cpp src/Physics.h
     src/Assets.cpp src/Assets.h src/Recording.cpp src/Recording.h src/MainWindowAssets.cpp
-    src/Hsc.cpp src/Hsc.h src/HscTypes.h src/ChronoHsc.cpp src/ChronoHsc.h src/MainWindowSettings.cpp src/MainWindowFem.cpp src/MainWindowVelocity.cpp src/Fem.cpp src/Fem.h src/HscNative.cpp src/HscNative.h)
+    src/Hsc.cpp src/Hsc.h src/HscTypes.h src/ChronoHsc.cpp src/ChronoHsc.h src/MainWindowSettings.cpp src/MainWindowFem.cpp src/MainWindowVelocity.cpp src/MainWindowAssembly.cpp src/Fem.cpp src/Fem.h src/HscNative.cpp src/HscNative.h)
 target_include_directories(bagua_editor SYSTEM PRIVATE ${BAGUA_EIGEN_INCLUDE})
 target_link_libraries(bagua_editor PUBLIC Qt6::Widgets Qt6::OpenGLWidgets Qt6::OpenGL)
 target_include_directories(bagua_editor PUBLIC src)

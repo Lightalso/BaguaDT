@@ -56,3 +56,5 @@ header 字段：`format="baguadt.recording"`、`version=1`、`scene`（完整 `.
   ]
 }
 ```
+
+逐步录制使用场景 `dt`，不是固定写死 1/240 s。录制中切换模式时 `sampling` 为 `mixed`，`samplingChanges` 按 `fromFrame` / `time` / `mode` 记录之后的采样方式。原生 ABD 网格的可选 `frameVertices`（四个独立顶点）与 `frameRestInverse`（行优先 4×4 矩阵）用于从已有逐帧顶点恢复完整仿射连接点坐标系；BGREC001 帧载荷格式保持兼容。

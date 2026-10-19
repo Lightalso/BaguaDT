@@ -17,7 +17,11 @@ public:
     int contacts() const;
     QString solverDescription() const;
     HscStats hscStats() const;
+    QVector<LinkStat> linkStats() const;
     bool hscActive() const;
+    // Integration step of the running backend (a scene may author its own dt, e.g. 1/30 for
+    // a vehicle); timeStep stays the Chrono/editor default.
+    double stepSize() const;
     Scene preview;
     static constexpr double timeStep = 1.0 / 240.0;
 

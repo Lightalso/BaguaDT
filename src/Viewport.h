@@ -22,6 +22,7 @@ public:
     float yaw = 38, pitch = 27, distance = 11;
     bool showGrid = true;
     bool editingEnabled = true;
+    bool anchorPicking = false;
     void setTool(Tool t);
     void setScene(Scene *model);
     void stopCameraNavigation();
@@ -29,6 +30,10 @@ public:
     void home();
     QPointF project(QVector3D world, bool *visible = nullptr) const;
     QString pick(QPointF point) const;
+    // Surface point under the cursor, for anchor picking.
+    QVector3D pickPoint(QPointF point, QString *objectId = nullptr) const;
+    bool showLinks = true;  // draw anchors and link axes
+    void setAnchorHighlight(const QString &objectId, int anchor);
     QPointF handlePoint(int axis) const;
     bool dragging() const { return activeAxis >= 0; }
     void cancelDrag();
@@ -37,6 +42,10 @@ public:
 signals:
     void toolChanged();
     void message(const QString &text);
+    // Left click in the viewport: world surface point (or the origin if nothing was hit).
+    void clicked(const QVector3D &world, const QString &objectId);
+    // Escape pressed in the viewport: also cancels an anchor-picking mode.
+    void cancelled();
 
 protected:
     bool event(QEvent *) override;
@@ -76,6 +85,8 @@ private:
     int activeAxis = -1, hoverAxis = -1;
     Object beforeDrag;
     bool ready = false;
+    QString highlightObject;
+    int highlightAnchor = -1;
     QVector3D eye() const;
     QMatrix4x4 vp() const;
     float gizmoLength() const;

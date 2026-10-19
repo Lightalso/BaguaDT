@@ -31,11 +31,13 @@ def linesearch(s):
   if old in s:s=s.replace(old,f'!std::isnan({value}) && (std::isfinite({value}) || (!is_initial && {value}>0))')
  return s
 modify('src/backends/cuda/line_search/line_searcher.cu',linesearch)
-modify('src/backends/cuda/engine/advance_ipc.cu',lambda s:s.replace('if(converged)\n                            break;','if(converged && std::isfinite(E))\n                            break;'))
+modify('src/backends/cuda/engine/advance_ipc.cu',lambda s:s.replace('if(converged)\n                            break;','if(converged && std::isfinite(E))\n                            break;').replace('constexpr bool AbortOnException = uipc::RUNTIME_CHECK;', 'constexpr bool AbortOnException = false; // Recover solver failures through EngineStatus in the desktop application.'))
 for p in (project/'native/overlays').rglob('*'):
  if p.is_file():
   target=source/p.relative_to(project/'native/overlays');target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(p,target)
 shutil.copy2(project/'native/LinearHsc.cu',source/'src/backends/cuda/linear_system/linear_hsc.cu')
+for p in [*(project/'native/overlays').rglob('*'),project/'native/LinearHsc.cu']:
+ if p.is_file():records.append({'overlay':p.relative_to(project).as_posix(),'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
 modify('CMakeLists.txt',lambda s:s+f'\nset(BAGUA_SOURCE_DIR "{project.as_posix()}")\nadd_subdirectory("{project.as_posix()}/native" bagua_hsc_native)\n')
 (BUILD/'patch-manifest.json').write_text(json.dumps(records,indent=2),encoding='utf-8')
 print('Applied complete HSC native overlays to '+str(source),flush=True)

@@ -17,6 +17,7 @@
 #include <QSlider>
 #include <QSpinBox>
 #include <QTabBar>
+#include <QTableWidget>
 #include <QTimer>
 #include <QTreeWidget>
 #include <QUndoGroup>
@@ -109,6 +110,41 @@ private:
     QCheckBox *recordOffline = nullptr;
     QListWidget *recordingList = nullptr;
     QAction *deleteRecordingAction = nullptr;
+    // Assembly (links / anchors / contact exclusions) editor.
+    QWidget *assemblyPanel = nullptr;
+    QTreeWidget *linkTree = nullptr;
+    QComboBox *linkType = nullptr, *linkBodyA = nullptr, *linkBodyB = nullptr;
+    QPushButton *linkAdd = nullptr, *linkUpdate = nullptr, *linkRemove = nullptr;
+    std::array<QDoubleSpinBox *, 3> linkAnchorA{}, linkAnchorB{}, linkAxis{};
+    QPushButton *linkPickA = nullptr, *linkPickB = nullptr;
+    QDoubleSpinBox *linkStrength = nullptr, *rotationAngle=nullptr, *rotationSpeed=nullptr;
+    std::array<QDoubleSpinBox *,3> anchorEdit{};
+    QCheckBox *limitEnabled = nullptr;
+    QDoubleSpinBox *limitLower = nullptr, *limitUpper = nullptr, *limitStrength = nullptr;
+    QTableWidget *stitchPairs = nullptr;
+    QCheckBox *stitchAnchorMode = nullptr;
+    QDoubleSpinBox *stitchStiffness = nullptr, *stitchRest = nullptr;
+    QPushButton *pairsAdd = nullptr, *pairsRemove = nullptr, *pairsAuto = nullptr;
+    QListWidget *anchorList = nullptr;
+    QPushButton *anchorAdd = nullptr, *anchorRemove = nullptr, *anchorPick = nullptr;
+    QComboBox *exclusionA = nullptr, *exclusionB = nullptr;
+    QPushButton *exclusionAdd = nullptr, *exclusionRemove = nullptr;
+    QListWidget *exclusionList = nullptr;
+    QLabel *linkDiagnostics = nullptr;
+    int pickTarget = 0; // 1 = anchor A, 2 = anchor B, 3 = a new anchor on the clicked body
+    bool assemblySyncing = false;
+    QJsonObject loadedLink;
+    QWidget *linkAnchorRow=nullptr,*linkLimitRow=nullptr,*linkRotationRow=nullptr,*linkStitchRow=nullptr;
+    void setupAssemblyDock();
+    void syncAssemblyPanel();
+    void syncLinkForm(const Link &link);
+    bool readLinkForm(Link &link, QString *error) const;
+    bool commitLinks(const QVector<Link> &links, const QVector<QPair<QString, QString>> &exclusions,
+                     const QString &label);
+    int selectedLinkIndex() const;
+    void deleteSelectedLink();
+    void updateLinkDiagnostics();
+    void handleViewportPick(const QVector3D &world, const QString &objectId);
     QTimer replayTimer;
     QElapsedTimer replayClock;
     std::array<QDoubleSpinBox *, 12> fields{};

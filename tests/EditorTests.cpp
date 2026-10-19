@@ -54,6 +54,28 @@ private slots:
         QCOMPARE(scene.json(),authored);
 #endif
     }
+    void femAbdStitchCarriesLoad() {
+#ifndef BAGUA_TEST_CUDA
+        QSKIP("Native CUDA backend disabled");
+#else
+        // Articulated assemblies (vehicle bead joints, suspension springs) rely on the FEM-ABD
+        // stitch carrying load. The rest length is the authored gap, so a free ABD weight must
+        // hang at that gap instead of falling: 19.6 N over 20000 N/m stretches it by ~1 mm.
+        Scene scene;scene.reset(false);
+        Object base;base.id="base";base.name="base";base.shape=Shape::Box;base.position={0,.6f,0};base.dimensions={.4f,.4f,.4f};
+        base.deformable=true;base.fixed=true;base.pinBottom=false;base.femResolution=2;base.youngModulus=20000;base.mass=8;
+        base.femAttachmentBody="weight";base.attachmentStiffness=20000;
+        Object weight;weight.id="weight";weight.name="weight";weight.position={0,.2f,0};weight.dimensions={.02f,.02f,.02f};
+        weight.mass=2;weight.collisionEnabled=false;
+        scene.objects={base,weight};
+        HscOptions options;options.enabled=true;Physics physics;QString error;
+        QVERIFY2(physics.start(scene,&error,options),qPrintable(error));
+        QVERIFY2(physics.step(240,&error),qPrintable(error));
+        auto object=physics.preview.find("weight");QVERIFY(object && object->mesh);
+        float center=0;for(auto p:object->mesh->positions)center+=object->matrix().map(p).y();center/=float(object->mesh->positions.size());
+        QVERIFY2(center>0.10f && center<0.30f,qPrintable(QString::number(center)));
+#endif
+    }
     void primitiveMeshesAreWatertight() {
         // Dynamic (ABD/IPC) bodies need a closed manifold surface. The built-in primitives must
         // weld exactly at their poles and seams, and must not emit zero-area triangles.
@@ -116,10 +138,14 @@ private slots:
 #ifndef BAGUA_TEST_CUDA
         QSKIP("Native CUDA backend disabled");
 #else
-        for(QString type:{"ball","hinge","prismatic","rotation"}) {
+        for(QString type:{"spherical","revolute","prismatic","fixed","rotation"}) {
             Scene scene;scene.reset(false);Object a;a.id="a";a.name="anchor";a.fixed=true;a.collisionEnabled=false;a.dimensions={.2f,.2f,.2f};Object b=a;b.id="b";b.name="body";b.fixed=false;b.position={.5f,0,0};scene.objects={a,b};
-            scene.joints={QJsonObject{{"id","joint"},{"type",type},{"bodyA","a"},{"bodyB","b"},{"anchor",QJsonArray{0,0,0}},{"axis",QJsonArray{0,0,1}},{"strength",1e4},{"angularVelocityDegrees",30}}};
+            Link link;link.id="link";QVERIFY(Link::typeFromKey(type,link.type));link.a="a";link.b="b";
+            link.anchorA={0,0,0};link.anchorB={-.5f,0,0};link.axis={0,0,1};link.strength=1e4;
+            link.angularVelocity=30*3.141592653589793/180.0;
+            scene.links={link};
             Physics physics;HscOptions options;options.enabled=true;QString error;QVERIFY2(physics.start(scene,&error,options),qPrintable(type+": "+error));QVERIFY2(physics.step(3,&error),qPrintable(type+": "+error));QVERIFY(physics.hscStats().converged);
+            QCOMPARE(physics.linkStats().size(),1);QCOMPARE(physics.linkStats().first().type,type);
         }
 #endif
     }
@@ -132,6 +158,344 @@ private slots:
         // The same asset must also drive the native FEM backend, not only the Chrono baseline.
         if(HscNative::available()){Physics native;HscOptions options;options.enabled=true;QVERIFY2(native.start(restored,&error,options),qPrintable(error));QVERIFY2(native.step(2,&error),qPrintable(error));QVERIFY(native.hscActive());}
 #endif
+    }
+    void linkModelPersistenceAndValidation() {
+        Scene scene;scene.reset(false);
+        Object base;base.id="base";base.name="base";base.fixed=true;base.position={0,.8f,0};base.dimensions={.4f,.4f,.4f};base.anchors={{0,-.2f,0}};
+        Object slider;slider.id="slider";slider.name="slider";slider.position={0,.5f,0};slider.dimensions={.1f,.1f,.1f};slider.anchors={{0,0,0}};
+        Object wheel;wheel.id="wheel";wheel.name="wheel";wheel.position={0,.299f,0};wheel.dimensions={.3f,.3f,.3f};wheel.anchors={{0,.15f,0}};
+        scene.objects={base,slider,wheel};scene.timeStep=1.0/120.0;
+        Link prismatic;prismatic.id="prismatic";prismatic.type=Link::Type::Prismatic;prismatic.a="base";prismatic.b="slider";
+        prismatic.anchorA={0,-.2f,0};prismatic.anchorB={0,.05f,0};prismatic.axis={0,1,0};prismatic.strength=1e5;
+        prismatic.hasLimit=true;prismatic.lower=-.15;prismatic.upper=.15;prismatic.limitStrength=100;
+        Link spring;spring.id="spring";spring.type=Link::Type::Stitch;spring.a="base";spring.b="slider";
+        spring.pairs={{0,0}};spring.anchorPairs=true;spring.stiffness=20000;spring.rest=.1;
+        Link revolute;revolute.id="revolute";revolute.type=Link::Type::Revolute;revolute.a="slider";revolute.b="wheel";
+        revolute.anchorA={0,-.05f,0};revolute.anchorB={0,.15f,0};revolute.axis={0,1,0};revolute.strength=1e5;
+        Link fixed;fixed.id="fixed";fixed.type=Link::Type::Fixed;fixed.a="base";fixed.b="wheel";fixed.anchorA={0,0,0};fixed.anchorB={0,0,0};fixed.strength=100;
+        Link spherical;spherical.id="spherical";spherical.type=Link::Type::Spherical;spherical.a="base";spherical.b="wheel";
+        spherical.anchorA={0,0,0};spherical.anchorB={0,0,0};spherical.strength=100;
+        scene.links={prismatic,spring,revolute,fixed,spherical};
+        scene.exclusions={{"slider","wheel"}};
+        // Round trip: every field of every link type survives save/load.
+        Scene restored;QString error;QVERIFY2(restored.loadJson(scene.json(),&error),qPrintable(error));
+        QCOMPARE(restored.links.size(),5);QCOMPARE(restored.exclusions.size(),1);
+        QCOMPARE(restored.objects[0].anchors.size(),1);
+        QCOMPARE(restored.timeStep,scene.timeStep);
+        const Link &back=restored.links[0];
+        QCOMPARE(back.typeKey(),QStringLiteral("prismatic"));QVERIFY(back.hasLimit);
+        QCOMPARE(back.lower,-.15);QCOMPARE(back.upper,.15);QCOMPARE(back.strength,1e5);
+        QCOMPARE(back.anchorA,QVector3D(0,-.2f,0));QCOMPARE(back.axis,QVector3D(0,1,0));
+        QVERIFY(restored.links[1].anchorPairs);QCOMPARE(restored.links[1].stiffness,20000.0);QCOMPARE(restored.links[1].rest,.1);
+        QCOMPARE(restored.links[1].pairs.size(),1);
+        QCOMPARE(restored.json(),scene.json());
+        // Invalid input must be refused and must not replace the current scene.
+        auto broken=[&](const std::function<void(QJsonObject &)> &edit) {
+            auto json=scene.json();edit(json);Scene target;QString message;
+            QVERIFY2(!target.loadJson(json,&message),qPrintable(message));
+        };
+        broken([](QJsonObject &j){auto l=j["links"].toArray();auto e=l[0].toObject();e["type"]="nonsense";l[0]=e;j["links"]=l;});
+        broken([](QJsonObject &j){auto l=j["links"].toArray();auto e=l[0].toObject();e["b"]="absent";l[0]=e;j["links"]=l;});
+        broken([](QJsonObject &j){auto l=j["links"].toArray();auto e=l[0].toObject();e["a"]="base";e["b"]="base";l[0]=e;j["links"]=l;});
+        broken([](QJsonObject &j){auto l=j["links"].toArray();auto e=l[0].toObject();e["limit"]=QJsonObject{{"lower",1.0},{"upper",-1.0}};l[0]=e;j["links"]=l;});
+        broken([](QJsonObject &j){auto l=j["links"].toArray();auto e=l[0].toObject();e["axis"]=QJsonArray{0,0,0};l[0]=e;j["links"]=l;});
+        broken([](QJsonObject &j){j["dt"]=0.5;});
+        broken([](QJsonObject &j){auto e=j["objects"].toArray()[0].toObject();e["fem"]=QJsonObject{{"youngModulus",5000.0},{"poissonRatio",.3},{"resolution",2}};auto o=j["objects"].toArray();o[0]=e;j["objects"]=o;});
+        broken([](QJsonObject &j){auto l=j["links"].toArray();auto e=l[1].toObject();e["pairs"]=QJsonArray{QJsonArray{5,0}};l[1]=e;j["links"]=l;});
+        // Version-1 joints (world anchors, legacy names) still load and become body-local links.
+        QJsonObject legacy{{"format","baguadt.scene"},{"version",1},{"units","m"},{"upAxis","Y"},
+                           {"objects",QJsonArray{QJsonObject{{"id","a"},{"name","a"},{"shape","box"},{"position",QJsonArray{0,2,0}},
+                                                            {"rotation",QJsonArray{0,0,0}},{"scale",QJsonArray{1,1,1}},{"dimensions",QJsonArray{1,1,1}},
+                                                            {"color","#ffffff"},{"visible",true},{"fixed",true}},
+                                                QJsonObject{{"id","b"},{"name","b"},{"shape","box"},{"position",QJsonArray{0,1,0}},
+                                                            {"rotation",QJsonArray{0,0,0}},{"scale",QJsonArray{1,1,1}},{"dimensions",QJsonArray{1,1,1}},
+                                                            {"color","#ffffff"},{"visible",true},{"fixed",false}}}},
+                           {"joints",QJsonArray{QJsonObject{{"id","legacy"},{"type","hinge"},{"bodyA","a"},{"bodyB","b"},
+                                                            {"anchor",QJsonArray{0,1.5,0}},{"axis",QJsonArray{0,0,1}},{"strength",100}}}}};
+        Scene migrated;QVERIFY2(migrated.loadJson(legacy,&error),qPrintable(error));
+        QCOMPARE(migrated.links.size(),1);QCOMPARE(migrated.links[0].typeKey(),QStringLiteral("revolute"));
+        // World anchor (0,1.5,0) relative to body a at y=2 is 0.5 below its centre.
+        QCOMPARE(migrated.links[0].anchorA,QVector3D(0,-.5f,0));
+        QCOMPARE(migrated.links[0].anchorB,QVector3D(0,.5f,0));
+    }
+    void nativeArticulatedSuspension() {
+#ifndef BAGUA_TEST_CUDA
+        QSKIP("Native CUDA backend disabled");
+#else
+        // A miniature suspension: fixed base -> prismatic guide with limits -> revolute wheel,
+        // with the base and slider joined by a rest-length spring stitch.
+        Scene scene;scene.reset(false);
+        Object base;base.id="base";base.name="base";base.position={0,.8f,0};base.dimensions={.4f,.4f,.4f};base.fixed=true;
+        base.anchors={{0,-.2f,0},{0,0,0}};
+        Object slider;slider.id="slider";slider.name="slider";slider.position={0,.5f,0};slider.dimensions={.1f,.1f,.1f};
+        slider.mass=1;slider.anchors={{0,0,0},{0,-.05f,0}};
+        Object wheel;wheel.id="wheel";wheel.name="wheel";wheel.position={0,.299f,0};wheel.dimensions={.3f,.3f,.3f};
+        wheel.mass=2;wheel.anchors={{0,.15f,0}};
+        scene.objects={base,slider,wheel};
+        Link prismatic;prismatic.id="prismatic";prismatic.type=Link::Type::Prismatic;prismatic.a="base";prismatic.b="slider";
+        prismatic.anchorA={0,-.2f,0};prismatic.anchorB={0,.05f,0};prismatic.axis={0,1,0};prismatic.strength=1e5;
+        prismatic.hasLimit=true;prismatic.lower=-.15;prismatic.upper=.15;prismatic.limitStrength=100;
+        Link spring;spring.id="spring";spring.type=Link::Type::Stitch;spring.a="base";spring.b="slider";
+        spring.pairs={{1,0}};spring.anchorPairs=true;spring.stiffness=20000;spring.rest=.3;
+        Link revolute;revolute.id="revolute";revolute.type=Link::Type::Revolute;revolute.a="slider";revolute.b="wheel";
+        revolute.anchorA={0,-.05f,0};revolute.anchorB={0,.15f,0};revolute.axis={0,1,0};revolute.strength=1e5;
+        scene.links={prismatic,spring,revolute};
+        scene.timeStep=1.0/120.0;
+        Scene restored;QString error;QVERIFY2(restored.loadJson(scene.json(),&error),qPrintable(error));
+        HscOptions options;options.enabled=true;Physics physics;
+        QVERIFY2(physics.start(restored,&error,options),qPrintable(error));
+        QCOMPARE(physics.stepSize(),1.0/120.0);
+        for(int i=0;i<240;++i)QVERIFY2(physics.step(1,&error),qPrintable(error));
+        QVERIFY(physics.hscStats().converged);
+        const auto stats=physics.linkStats();
+        QCOMPARE(int(stats.size()),3);
+        auto stat=[&](const QString &id) {
+            for(const auto &entry:stats)if(entry.id==id)return entry;
+            return LinkStat{};
+        };
+        const auto guide=stat("prismatic"),coil=stat("spring"),hinge=stat("revolute");
+        // The guide keeps the slider on the axis and inside its travel limit; |distance| is the
+        // authored 5 cm gap between the guide anchors.
+        QVERIFY(guide.hasDistance);QVERIFY(guide.hasLimit);
+        QVERIFY2(guide.distance>=guide.limitLower && guide.distance<=guide.limitUpper,qPrintable(QString::number(guide.distance)));
+        QVERIFY2(std::abs(std::abs(guide.distance)-0.05)<0.01,qPrintable(QString::number(guide.distance)));
+        // The spring carries the slider+wheel weight: 3*9.81/20000 = 1.5 mm of extra length.
+        QVERIFY2(coil.error<0.005,qPrintable(QString::number(coil.error)));
+        // The wheel is held by the hinge instead of falling (a free wheel would be far below).
+        auto object=physics.preview.find("wheel");QVERIFY(object && object->mesh);
+        // Average only the shape vertices: the visual mesh ends with the virtual anchors.
+        const qsizetype shapeVertices=object->mesh->positions.size()-wheel.anchors.size();
+        QVERIFY(shapeVertices>=8);
+        float center=0;for(qsizetype i=0;i<shapeVertices;++i)center+=object->matrix().map(object->mesh->positions[i]).y();center/=float(shapeVertices);
+        QVERIFY2(std::abs(center-0.299f)<0.01f,qPrintable(QString::number(center)));
+        QVERIFY(hinge.hasAngle);
+        qInfo("articulated suspension: guide=%.6f limit=[%.3f,%.3f] springError=%.6f hingeAngle=%.6f wheelY=%.6f",guide.distance,guide.limitLower,guide.limitUpper,coil.error,hinge.angle,double(center));
+#endif
+    }
+    void nativeContactExclusionAllowsOverlap() {
+#ifndef BAGUA_TEST_CUDA
+        QSKIP("Native CUDA backend disabled");
+#else
+        // Vehicle proxies overlap on purpose (guide in its slider, hub inside the rim); IPC
+        // cannot start from intersecting surfaces, so the excluded pair must be accepted and
+        // must not push the bodies apart.
+        Scene scene;scene.reset(false);
+        Object base;base.id="base";base.name="base";base.position={0,0,0};base.dimensions={.4f,.4f,.4f};base.fixed=true;
+        Object body;body.id="body";body.name="body";body.position={.3f,0,0};body.dimensions={.4f,.4f,.4f};body.mass=2;
+        scene.objects={base,body};scene.exclusions={{"base","body"}};
+        HscOptions options;options.enabled=true;Physics physics;QString error;
+        QVERIFY2(physics.start(scene,&error,options),qPrintable(error));
+        QVERIFY2(physics.step(60,&error),qPrintable(error));
+        QVERIFY(physics.hscStats().converged);
+        auto object=physics.preview.find("body");QVERIFY(object && object->mesh);
+        float center=0;for(auto p:object->mesh->positions)center+=object->matrix().map(p).x();center/=float(object->mesh->positions.size());
+        QVERIFY2(std::abs(center-0.3f)<0.005f,qPrintable(QString::number(center)));
+        QCOMPARE(physics.contacts(),0);
+#endif
+    }
+    void linkSceneGuiFlow() {
+        // Mirrors what a user does with an assembly scene: open, play with the timer loop,
+        // reset, play again, then close the window.
+        MainWindow w;
+        w.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&w));
+        if (!Physics::available() || !HscNative::available()) {
+            QVERIFY(w.close());
+            return;
+        }
+        Scene source;source.reset(false);
+        Object base;base.id="base";base.name="base";base.fixed=true;base.position={0,.6f,0};base.dimensions={.4f,.4f,.4f};base.anchors={{0,-.2f,0}};
+        Object body;body.id="body";body.name="body";body.position={0,.3f,0};body.dimensions={.1f,.1f,.1f};body.anchors={{0,0,0}};
+        source.objects={base,body};
+        Link guide;guide.id="guide";guide.type=Link::Type::Prismatic;guide.a="base";guide.b="body";
+        guide.anchorA={0,-.2f,0};guide.anchorB={0,0,0};guide.axis={0,1,0};guide.strength=1e5;
+        guide.hasLimit=true;guide.lower=-.1;guide.upper=.1;
+        Link spring;spring.id="spring";spring.type=Link::Type::Stitch;spring.a="base";spring.b="body";
+        spring.pairs={{0,0}};spring.anchorPairs=true;spring.stiffness=20000;spring.rest=.3;
+        source.links={guide,spring};
+        w.newScene(false);
+        QString error;
+        QVERIFY2(w.scene->loadJson(source.json(),&error),qPrintable(error));
+        w.scene->undo.setClean();
+        HscOptions nativeOptions;nativeOptions.enabled=true;
+        w.setPhysicsOptions(nativeOptions);
+        // First run: the timer loop must advance the native world and stay valid.
+        QVERIFY(w.startSimulation());
+        QTRY_VERIFY_WITH_TIMEOUT(w.simulationTime()>0.02,5000);
+        QVERIFY(w.physicsOptions().enabled);
+        // Reset tears the native world down; a second run rebuilds it.
+        w.resetSimulation();
+        QVERIFY(!w.simulationActive());
+        QVERIFY(w.startSimulation());
+        QTRY_VERIFY_WITH_TIMEOUT(w.simulationTime()>0.02,5000);
+        w.pauseSimulation();
+        w.resetSimulation();
+        QVERIFY(w.close());
+    }
+    void linkSceneCloseWhileRunning() {
+        // Closing the window while the timer loop drives the native world: teardown order must
+        // stop the loop and release the native world before the DLL is unloaded.
+        auto build=[&](MainWindow &w) {
+            Scene source;source.reset(false);
+            Object base;base.id="base";base.name="base";base.fixed=true;base.position={0,.6f,0};base.dimensions={.4f,.4f,.4f};base.anchors={{0,-.2f,0}};
+            Object body;body.id="body";body.name="body";body.position={0,.3f,0};body.dimensions={.1f,.1f,.1f};body.anchors={{0,0,0}};
+            source.objects={base,body};
+            Link spring;spring.id="spring";spring.type=Link::Type::Stitch;spring.a="base";spring.b="body";
+            spring.pairs={{0,0}};spring.anchorPairs=true;spring.stiffness=20000;spring.rest=.3;
+            source.links={spring};
+            w.newScene(false);QString error;QVERIFY2(w.scene->loadJson(source.json(),&error),qPrintable(error));
+            w.scene->undo.setClean();
+            HscOptions nativeOptions;nativeOptions.enabled=true;w.setPhysicsOptions(nativeOptions);
+        };
+        {
+            MainWindow w;w.show();QVERIFY(QTest::qWaitForWindowExposed(&w));
+            if (!Physics::available() || !HscNative::available()) {QVERIFY(w.close());return;}
+            build(w);
+            QVERIFY(w.startSimulation());
+            QTRY_VERIFY_WITH_TIMEOUT(w.simulationTime()>0.02,5000);
+            QVERIFY(w.close());   // still running, never paused
+        }
+        {
+            MainWindow w;w.show();QVERIFY(QTest::qWaitForWindowExposed(&w));
+            build(w);
+            QVERIFY(w.startSimulation());
+            QTRY_VERIFY_WITH_TIMEOUT(w.simulationTime()>0.02,5000);
+            w.newScene(false);    // switch away from the running document
+            QVERIFY(w.startSimulation());
+            QTRY_VERIFY_WITH_TIMEOUT(w.simulationTime()>0.02,5000);
+            QVERIFY(w.close());
+        }
+    }
+    void assemblyPanelEditsLinks() {
+        MainWindow w;
+        w.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&w));
+        w.newScene(false);
+        Object base;base.id="base";base.name="base";base.position={0,.6f,0};base.dimensions={.4f,.4f,.4f};
+        Object body;body.id="body";body.name="body";body.position={0,.3f,0};body.dimensions={.1f,.1f,.1f};
+        w.scene->objects={base,body};
+        w.scene->notify();
+        w.scene->undo.setClean();
+        auto *type = w.findChild<QComboBox *>("linkType");
+        auto *a = w.findChild<QComboBox *>("linkBodyA");
+        auto *b = w.findChild<QComboBox *>("linkBodyB");
+        auto *add = w.findChild<QPushButton *>("linkAdd");
+        auto *update = w.findChild<QPushButton *>("linkUpdate");
+        auto *remove = w.findChild<QPushButton *>("linkRemove");
+        auto *tree = w.findChild<QTreeWidget *>("linkTree");
+        auto *anchorAdd = w.findChild<QPushButton *>("anchorAdd");
+        auto *anchorList = w.findChild<QListWidget *>("anchorList");
+        auto *exclusionAdd = w.findChild<QPushButton *>("exclusionAdd");
+        auto *exclusionRemove = w.findChild<QPushButton *>("exclusionRemove");
+        auto *exclusionList = w.findChild<QListWidget *>("exclusionList");
+        auto *exclusionA = w.findChild<QComboBox *>("exclusionBodyA");
+        auto *exclusionB = w.findChild<QComboBox *>("exclusionBodyB");
+        QVERIFY(type && a && b && add && update && remove && tree && anchorAdd && anchorList);
+        QVERIFY(exclusionAdd && exclusionRemove && exclusionList && exclusionA && exclusionB);
+        // The panel lists both objects for A/B selection.
+        QCOMPARE(a->count(),2);QCOMPARE(b->count(),2);
+        // Anchors: adding one through the panel writes the object's anchor list.
+        w.scene->select("base");
+        anchorAdd->click();
+        QCOMPARE(w.scene->find("base")->anchors.size(),1);
+        QCOMPARE(anchorList->count(),1);
+        w.scene->undo.undo();
+        QCOMPARE(w.scene->find("base")->anchors.size(),0);
+        w.scene->undo.redo();
+        // Create a prismatic link with limit through the form.
+        type->setCurrentIndex(type->findData("prismatic"));
+        a->setCurrentIndex(a->findData("base"));
+        b->setCurrentIndex(b->findData("body"));
+        w.findChild<QDoubleSpinBox *>("linkAnchorAX")->setValue(0);
+        w.findChild<QDoubleSpinBox *>("linkAnchorAY")->setValue(-0.2);
+        w.findChild<QDoubleSpinBox *>("linkAnchorBZ")->setValue(0);
+        w.findChild<QDoubleSpinBox *>("linkAxisY")->setValue(1);
+        w.findChild<QDoubleSpinBox *>("linkStrength")->setValue(2500);
+        auto *limitEnabled = w.findChild<QCheckBox *>("limitEnabled");
+        QVERIFY(limitEnabled);
+        limitEnabled->setChecked(true);
+        w.findChild<QDoubleSpinBox *>("limitLower")->setValue(-0.1);
+        w.findChild<QDoubleSpinBox *>("limitUpper")->setValue(0.1);
+        add->click();
+        QCOMPARE(w.scene->links.size(),1);
+        QCOMPARE(w.scene->links[0].typeKey(),QStringLiteral("prismatic"));
+        QCOMPARE(w.scene->links[0].a,QStringLiteral("base"));QCOMPARE(w.scene->links[0].b,QStringLiteral("body"));
+        QCOMPARE(w.scene->links[0].strength,2500.0);QVERIFY(w.scene->links[0].hasLimit);
+        QCOMPARE(w.scene->links[0].lower,-.1);QCOMPARE(w.scene->links[0].anchorA,QVector3D(0,-.2f,0));
+        QCOMPARE(tree->topLevelItemCount(),1);
+        // Undo removes it, redo restores it.
+        w.scene->undo.undo();
+        QCOMPARE(w.scene->links.size(),0);
+        w.scene->undo.redo();
+        QCOMPARE(w.scene->links.size(),1);
+        // Rejecting an invalid form keeps the link list untouched.
+        const int undoIndex = w.scene->undo.index();
+        b->setCurrentIndex(b->findData("base"));   // same body on both sides
+        add->click();
+        QCOMPARE(w.scene->links.size(),1);
+        QCOMPARE(w.scene->undo.index(),undoIndex);
+        b->setCurrentIndex(b->findData("body"));
+        // Update the selected link's strength.
+        tree->setCurrentItem(tree->topLevelItem(0));
+        w.findChild<QDoubleSpinBox *>("linkStrength")->setValue(8000);
+        update->click();
+        QCOMPARE(w.scene->links.size(),1);
+        QCOMPARE(w.scene->links[0].strength,8000.0);
+        // Contact exclusion add/remove.
+        exclusionA->setCurrentIndex(exclusionA->findData("base"));
+        exclusionB->setCurrentIndex(exclusionB->findData("body"));
+        exclusionAdd->click();
+        QCOMPARE(w.scene->exclusions.size(),1);
+        QCOMPARE(exclusionList->count(),1);
+        exclusionList->setCurrentRow(0);
+        exclusionRemove->click();
+        QCOMPARE(w.scene->exclusions.size(),0);
+        // Delete the link through the panel.
+        tree->setCurrentItem(tree->topLevelItem(0));
+        remove->click();
+        QCOMPARE(w.scene->links.size(),0);
+        w.scene->undo.setClean();
+        QVERIFY(w.close());
+    }
+    void assemblyReferentialIntegrity() {
+        Scene scene;scene.reset(false);Object a;a.id="a";a.name="a";a.anchors={{0,0,0},{0,1,0},{0,2,0}};Object b=a;b.id="b";b.name="b";
+        scene.objects={a,b};Link stitch;stitch.id="spring";stitch.type=Link::Type::Stitch;stitch.a="a";stitch.b="b";stitch.anchorPairs=true;stitch.pairs={{0,0},{1,1},{2,2}};scene.links={stitch};scene.exclusions={{"a","b"}};
+        const auto original=scene.json();scene.removeAnchor("a",1);QCOMPARE(scene.links[0].pairs,(QVector<QPair<int,int>>{{0,0},{1,2}}));Scene restored;QString error;QVERIFY2(restored.loadJson(scene.json(),&error),qPrintable(error));
+        scene.undo.undo();QCOMPARE(scene.json(),original);scene.undo.redo();QCOMPARE(scene.find("a")->anchors.size(),2);scene.undo.undo();
+        scene.select("a");scene.removeSelected();QVERIFY(scene.links.isEmpty());QVERIFY(scene.exclusions.isEmpty());QVERIFY2(restored.loadJson(scene.json(),&error),qPrintable(error));scene.undo.undo();QCOMPARE(scene.json().value("links"),original["links"]);QCOMPARE(scene.json().value("exclusions"),original["exclusions"]);
+        auto broken=original;auto ls=broken["links"].toArray();auto l=ls[0].toObject();l["anchorPairs"]=false;l["pairs"]=QJsonArray{QJsonArray{0,99999}};ls[0]=l;broken["links"]=ls;QVERIFY(!restored.loadJson(broken,&error));
+    }
+    void assemblyPanelSelectionAndPicking() {
+        MainWindow w;w.show();QVERIFY(QTest::qWaitForWindowExposed(&w));w.newScene(false);Object a;a.id="a";a.name="a";a.position={0,1,0};a.dimensions={2,1,1};a.scale={2,1,1};Object b=a;b.id="b";b.name="b";b.position={3,1,0};w.scene->objects={a,b};w.scene->notify();
+        auto *type=w.findChild<QComboBox *>("linkType"),*left=w.findChild<QComboBox *>("linkBodyA"),*right=w.findChild<QComboBox *>("linkBodyB");left->setCurrentIndex(left->findData("a"));right->setCurrentIndex(right->findData("b"));
+        auto *add=w.findChild<QPushButton *>("linkAdd");add->click();add->click();QCOMPARE(w.scene->links.size(),2);QVERIFY(w.scene->links[0].id!=w.scene->links[1].id);Scene restored;QString error;QVERIFY2(restored.loadJson(w.scene->json(),&error),qPrintable(error));
+        auto *limit=w.findChild<QCheckBox *>("limitEnabled");limit->setChecked(true);QVERIFY(w.findChild<QDoubleSpinBox *>("limitLower")->isEnabled());limit->setChecked(false);QVERIFY(!w.findChild<QDoubleSpinBox *>("limitLower")->isEnabled());
+        auto *v=w.findChild<Viewport *>();QVERIFY(v);w.scene->select("a");auto *pick=w.findChild<QPushButton *>("anchorPick");pick->click();QVERIFY(v->anchorPicking);auto world=a.anchorMatrix().map({.3f,0,0});QVERIFY(QMetaObject::invokeMethod(v,"clicked",Qt::DirectConnection,Q_ARG(QVector3D,world),Q_ARG(QString,QString("a"))));QCOMPARE(w.scene->find("a")->anchors.size(),1);QVERIFY((w.scene->find("a")->anchors[0]-QVector3D(.3f,0,0)).length()<1e-5f);QVERIFY(!v->anchorPicking);
+        w.scene->undo.setClean();QVERIFY(w.close());
+    }
+    void sceneTimeStepForChrono() {
+        if(!Physics::available())QSKIP("Chrono disabled");Scene scene;scene.reset(false);Object o;o.id="a";o.name="a";o.position={0,10,0};o.collisionEnabled=false;scene.objects={o};scene.timeStep=1./120.;Physics physics;QString error;QVERIFY2(physics.start(scene,&error),qPrintable(error));QCOMPARE(physics.stepSize(),scene.timeStep);QVERIFY(physics.step(2,&error));QVERIFY(std::abs(physics.time()-1./60.)<1e-12);
+        scene.exclusions={{"a","missing"}};QVERIFY(!physics.start(scene,&error));
+    }
+    void nativeScaledAnchorsAndPlaybackFrames() {
+#ifndef BAGUA_TEST_CUDA
+        QSKIP("Native CUDA backend disabled");
+#else
+        Scene scene;scene.reset(false);Object a;a.id="a";a.name="a";a.position={0,2,0};a.rotation={13,24,7};a.dimensions={.2f,.4f,.6f};a.scale={2,3,4};a.anchors={{.03f,.05f,.07f}};a.linearVelocity={1,0,0};a.collisionEnabled=false;scene.objects={a};Physics physics;HscOptions options;options.enabled=true;QString error;QVERIFY2(physics.start(scene,&error,options),qPrintable(error));
+        auto *body=physics.preview.find("a");auto original=a.anchorMatrix().map(a.anchors[0]);QVERIFY((body->anchorMatrix().map(a.anchors[0])-original).length()<1e-5f);QVERIFY2(physics.step(4,&error),qPrintable(error));body=physics.preview.find("a");auto moving=body->anchorMatrix().map(a.anchors[0]);QVERIFY(moving.x()>original.x()+.015f);auto actual=body->matrix().map(body->mesh->positions.last());QVERIFY((actual-moving).length()<1e-5f);
+        Recording recording;recording.begin(physics.preview);QVERIFY(physics.step(1,&error));QVERIFY(recording.append(physics.time(),physics.preview,&error));QTemporaryDir temp(QDir::currentPath()+"/frames-XXXXXX");QVERIFY(recording.save(temp.filePath("frames.brec"),&error));Recording loaded;QVERIFY2(loaded.load(temp.filePath("frames.brec"),&error),qPrintable(error));QVector<Object> frame;QVERIFY(loaded.frame(1,frame,&error));QVERIFY((frame[0].anchorMatrix().map(a.anchors[0])-physics.preview.find("a")->anchorMatrix().map(a.anchors[0])).length()<1e-5f);
+#endif
+    }
+    void nativeSolverFailureReturnsError() {
+#ifndef BAGUA_TEST_CUDA
+        QSKIP("Native CUDA backend disabled");
+#else
+        Scene scene;scene.reset(false);Object soft;soft.id="soft";soft.name="soft";soft.deformable=true;soft.pinBottom=true;soft.femResolution=2;soft.position={0,1,0};scene.objects={soft};HscOptions options;options.enabled=true;options.maxIterations=1;options.linearTolerance=1e-12;Physics physics;QString error;QVERIFY2(physics.start(scene,&error,options),qPrintable(error));QVERIFY(!physics.step(1,&error));QVERIFY(!error.isEmpty());QVERIFY(!physics.step(1,&error));physics.reset();options.maxIterations=2000;options.linearTolerance=1e-4;QVERIFY2(physics.start(scene,&error,options),qPrintable(error));QVERIFY2(physics.step(2,&error),qPrintable(error));
+#endif
+    }
+    void reopeningProjectPreservesExistingTakes() {
+        QTemporaryDir temp(QDir::currentPath()+"/project-audit-XXXXXX");Scene source;source.reset(false);source.create(Shape::Box);QString error;QVERIFY(source.save(temp.filePath("scene.bagua.json"),&error));Recording take;take.begin(source);source.objects[0].position.setX(2);QVERIFY(take.append(.1,source,&error));QVERIFY(take.save(temp.filePath("take.brec"),&error));QFile file(temp.filePath("project.bagua.project.json"));QVERIFY(file.open(QIODevice::WriteOnly));file.write(QJsonDocument(QJsonObject{{"format","baguadt.project"},{"version",1},{"scenes",QJsonArray{QJsonObject{{"scene","scene.bagua.json"},{"recordings",QJsonArray{"take.brec"}},{"mode","replay"}}}}}).toJson());file.close();
+        MainWindow w;w.show();QVERIFY(QTest::qWaitForWindowExposed(&w));QVERIFY(w.openPath(temp.filePath("scene.bagua.json")));auto *original=w.scene;original->create(Shape::Sphere);const auto authored=original->json();auto *tabs=w.findChild<QTabBar *>("sceneTabs");int count=tabs->count();QVERIFY(w.openProject(file.fileName()));QCOMPARE(tabs->count(),count+1);QCOMPARE(original->json().value("objects"),authored["objects"]);QCOMPARE(original->json().value("links"),authored["links"]);QVERIFY(w.replayActive());QCOMPARE(w.recordedFrames(),2);w.stopReplay();QVERIFY(w.openProject(file.fileName()));QCOMPARE(tabs->count(),count+2);QCOMPARE(original->json().value("objects"),authored["objects"]);QCOMPARE(original->json().value("links"),authored["links"]);original->undo.setClean();QVERIFY(w.close());
     }
     void paperRotationDerivativesAndFrames() {
         std::array<double,12> a{},b{};a[3]=a[7]=a[11]=b[3]=b[7]=b[11]=1;
@@ -163,11 +527,15 @@ private slots:
     }
     void jointsPersistenceAndChronoMapping() {
         Scene scene;scene.reset(false);Object a,b;a.id="a";a.name="parent";a.fixed=true;a.position={0,2,0};b=a;b.id="b";b.name="child";b.fixed=false;b.position={0,1,0};scene.objects={a,b};
-        for(auto type:{"ball","hinge","prismatic","rotation"}) {
-            scene.joints={QJsonObject{{"id","joint"},{"type",type},{"bodyA","a"},{"bodyB","b"},{"anchor",QJsonArray{0,1.5,0}},{"axis",QJsonArray{0,0,1}},{"angleDegrees",0}}};
-            Scene restored;QString error;QVERIFY2(restored.loadJson(scene.json(),&error),qPrintable(error));QCOMPARE(restored.joints,scene.joints);
+        for(auto type:{"spherical","revolute","prismatic","fixed","rotation"}) {
+            Link link;link.id="link";QVERIFY(Link::typeFromKey(type,link.type));link.a="a";link.b="b";
+            // Anchors coincide in world space halfway between the two bodies.
+            link.anchorA={0,-.5f,0};link.anchorB={0,.5f,0};link.axis={0,0,1};link.strength=100;
+            scene.links={link};
+            Scene restored;QString error;QVERIFY2(restored.loadJson(scene.json(),&error),qPrintable(error));QCOMPARE(restored.links.size(),1);
+            QCOMPARE(restored.links[0].typeKey(),QString(type));QCOMPARE(restored.links[0].axis,link.axis);
             if(Physics::available()){Physics physics;QVERIFY2(physics.start(restored,&error),qPrintable(error));QVERIFY2(physics.step(4,&error),qPrintable(error));}
-            auto broken=scene.json();auto joint=scene.joints[0].toObject();joint["bodyB"]="missing";broken["joints"]=QJsonArray{joint};auto before=restored.json();QVERIFY(!restored.loadJson(broken,&error));QCOMPARE(restored.json(),before);
+            auto broken=scene.json();auto links=broken["links"].toArray();auto entry=links[0].toObject();entry["b"]="missing";links[0]=entry;broken["links"]=links;auto before=restored.json();QVERIFY(!restored.loadJson(broken,&error));QCOMPARE(restored.json(),before);
         }
     }
     void hscCudaSparseConformance() {

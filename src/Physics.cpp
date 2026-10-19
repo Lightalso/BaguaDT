@@ -14,14 +14,14 @@
 #include "chrono/collision/ChCollisionShapeEllipsoid.h"
 #include "chrono/collision/ChCollisionShapeSphere.h"
 #include "chrono/collision/ChCollisionShapeTriangleMesh.h"
-#include "chrono/functions/ChFunctionRamp.h"
 #include "chrono/functions/ChFunctionConst.h"
+#include "chrono/functions/ChFunctionRamp.h"
 #include "chrono/geometry/ChTriangleMeshConnected.h"
 #include "chrono/physics/ChBody.h"
 #include "chrono/physics/ChContactMaterialNSC.h"
 #include "chrono/physics/ChContactMaterialSMC.h"
-#include "chrono/physics/ChLoadContainer.h"
 #include "chrono/physics/ChLinkLock.h"
+#include "chrono/physics/ChLoadContainer.h"
 #include "chrono/physics/ChLoadsNodeXYZ.h"
 #include "chrono/physics/ChSystemNSC.h"
 #include "chrono/physics/ChSystemSMC.h"
@@ -31,6 +31,7 @@
 namespace bagua {
 struct Physics::Impl {
     std::unique_ptr<HscNative> native;
+    double dt = timeStep;
 #ifdef BAGUA_HAS_CHRONO
     std::unique_ptr<chrono::ChSystem> system;
     std::vector<std::shared_ptr<chrono::ChBody>> bodies;
@@ -55,7 +56,8 @@ void Physics::reset() {
     preview.selected.clear();
 }
 double Physics::time() const {
-    if (impl && impl->native) return impl->native->time();
+    if (impl && impl->native)
+        return impl->native->time();
 #ifdef BAGUA_HAS_CHRONO
     return impl ? impl->system->GetChTime() : 0;
 #else
@@ -63,7 +65,8 @@ double Physics::time() const {
 #endif
 }
 int Physics::contacts() const {
-    if (impl && impl->native) return impl->native->stats().contactCount;
+    if (impl && impl->native)
+        return impl->native->stats().contactCount;
 #ifdef BAGUA_HAS_CHRONO
     return impl ? impl->system->GetNumContacts() : 0;
 #else
@@ -71,14 +74,22 @@ int Physics::contacts() const {
 #endif
 }
 bool Physics::start(const Scene &source, QString *error, HscOptions options) {
+    Scene validated;
+    if (!validated.loadJson(source.json(), error))
+        return false;
     if (options.enabled && options.nativePipeline) {
-        auto next=std::make_unique<Impl>();next->native=std::make_unique<HscNative>();
-        if (!next->native->start(source,preview,options,error))return false;
-        next->description=QStringLiteral("HSC CUDA · ABD / IPC / CCD / Newton");impl=std::move(next);return true;
+        auto next = std::make_unique<Impl>();
+        next->native = std::make_unique<HscNative>();
+        if (!next->native->start(source, preview, options, error))
+            return false;
+        next->description = QStringLiteral("HSC CUDA · ABD / IPC / CCD / Newton");
+        impl = std::move(next);
+        return true;
     }
 #ifdef BAGUA_HAS_CHRONO
     try {
         auto next = std::make_unique<Impl>();
+        next->dt = source.timeStep;
         const bool elastic =
             std::any_of(source.objects.cbegin(), source.objects.cend(), [](const Object &o) { return o.deformable; });
         const bool mixed = std::any_of(source.objects.cbegin(), source.objects.cend(), [](const Object &o) {
@@ -142,8 +153,10 @@ bool Physics::start(const Scene &source, QString *error, HscOptions options) {
             body->SetPos({o.position.x(), o.position.y(), o.position.z()});
             auto q = QQuaternion::fromEulerAngles(o.rotation);
             body->SetRot({q.scalar(), q.x(), q.y(), q.z()});
-            body->SetPosDt({o.linearVelocity.x(),o.linearVelocity.y(),o.linearVelocity.z()});
-            body->SetAngVelParent(chrono::ChVector3d(o.angularVelocity.x(),o.angularVelocity.y(),o.angularVelocity.z())*(chrono::CH_PI/180.));
+            body->SetPosDt({o.linearVelocity.x(), o.linearVelocity.y(), o.linearVelocity.z()});
+            body->SetAngVelParent(
+                chrono::ChVector3d(o.angularVelocity.x(), o.angularVelocity.y(), o.angularVelocity.z()) *
+                (chrono::CH_PI / 180.));
             body->SetFixed(o.fixed || o.shape == Shape::Plane);
             body->SetMass(o.mass);
             double x = d.x(), y = o.shape == Shape::Plane ? .1 : d.y(), z = d.z();
@@ -238,28 +251,58 @@ bool Physics::start(const Scene &source, QString *error, HscOptions options) {
             sys.AddBody(body);
             next->bodies.push_back(body);
         }
-        // The scene's joint schema maps to exact Chrono links in the baseline mode.
-        for (auto value:source.joints) {
-            auto j=value.toObject();auto body=[&](QString id) {
-                for(int i=0;i<source.objects.size();++i)if(source.objects[i].id==id && next->bodies[size_t(i)])return next->bodies[size_t(i)];
-                throw std::runtime_error("Chrono joint references a missing rigid body");
+        // Rigid links map to exact Chrono links in the baseline mode. Soft stitches and the
+        // legacy paper-rotation drive are native-backend features, not something Chrono can
+        // reproduce, so they are refused instead of silently changing the model.
+        for (const auto &value : source.links) {
+            const auto &link = value;
+            if (link.type == Link::Type::Stitch)
+                throw std::runtime_error(
+                    "Soft vertex stitches need the native HSC backend; enable HSC instead of the Chrono baseline.");
+            auto body = [&](const QString &id) {
+                for (int i = 0; i < source.objects.size(); ++i)
+                    if (source.objects[i].id == id && next->bodies[size_t(i)])
+                        return next->bodies[size_t(i)];
+                throw std::runtime_error("Chrono link references a missing rigid body");
             };
-            auto a=body(j["bodyA"].toString()),b=body(j["bodyB"].toString());auto p=j["anchor"].toArray(),axis=j["axis"].toArray();
-            QVector3D direction(0,0,1);if(axis.size()==3)direction={float(axis[0].toDouble()),float(axis[1].toDouble()),float(axis[2].toDouble())};
-            auto q=QQuaternion::rotationTo(QVector3D(0,0,1),direction.normalized());
-            chrono::ChFrame<> frame(chrono::ChVector3d(p[0].toDouble(),p[1].toDouble(),p[2].toDouble()),chrono::ChQuaternion<>(q.scalar(),q.x(),q.y(),q.z()));
-            auto type=j["type"].toString();std::shared_ptr<chrono::ChLinkLock> link;
-            if(type=="ball")link=chrono_types::make_shared<chrono::ChLinkLockSpherical>();
-            else if(type=="hinge")link=chrono_types::make_shared<chrono::ChLinkLockRevolute>();
-            else if(type=="prismatic")link=chrono_types::make_shared<chrono::ChLinkLockPrismatic>();
-            else if(type=="rotation") {
-                auto prescribed=chrono_types::make_shared<chrono::ChLinkLockLock>();
-                prescribed->SetMotionAxis({0,0,1});
-                prescribed->SetMotionAng1(chrono_types::make_shared<chrono::ChFunctionRamp>(j["angleDegrees"].toDouble()*chrono::CH_PI/180.,j["angularVelocityDegrees"].toDouble()*chrono::CH_PI/180.));
-                link=prescribed;
-            }
-            else throw std::runtime_error("Unsupported Chrono joint type");
-            if(type=="rotation")link->Initialize(b,a,frame);else link->Initialize(a,b,frame);sys.AddLink(link);
+            auto a = body(link.a), b = body(link.b);
+            // Links are stored with body-local anchors; Chrono frames are world-space.
+            QVector3D world = link.anchorA;
+            for (const auto &o : source.objects)
+                if (o.id == link.a) {
+                    world = o.anchorMatrix().map(link.anchorA);
+                    break;
+                }
+            QVector3D direction = link.axis.normalized();
+            auto q = QQuaternion::rotationTo(QVector3D(0, 0, 1), direction);
+            chrono::ChFrame<> frame(chrono::ChVector3d(world.x(), world.y(), world.z()),
+                                    chrono::ChQuaternion<>(q.scalar(), q.x(), q.y(), q.z()));
+            std::shared_ptr<chrono::ChLinkLock> chronoLink;
+            if (link.type == Link::Type::Spherical)
+                chronoLink = chrono_types::make_shared<chrono::ChLinkLockSpherical>();
+            else if (link.type == Link::Type::Revolute)
+                chronoLink = chrono_types::make_shared<chrono::ChLinkLockRevolute>();
+            else if (link.type == Link::Type::Prismatic)
+                chronoLink = chrono_types::make_shared<chrono::ChLinkLockPrismatic>();
+            else if (link.type == Link::Type::Fixed)
+                chronoLink = chrono_types::make_shared<chrono::ChLinkLockLock>();
+            else if (link.type == Link::Type::Rotation) {
+                auto prescribed = chrono_types::make_shared<chrono::ChLinkLockLock>();
+                prescribed->SetMotionAxis({0, 0, 1});
+                prescribed->SetMotionAng1(
+                    chrono_types::make_shared<chrono::ChFunctionRamp>(link.angle, link.angularVelocity));
+                chronoLink = prescribed;
+            } else
+                throw std::runtime_error("Unsupported Chrono link type");
+            const auto *oa = source.find(link.a), *ob = source.find(link.b);
+            auto localA = oa->anchorMatrix().map(link.anchorA), localB = ob->anchorMatrix().map(link.anchorB);
+            chrono::ChFrame<> fa({localA.x(), localA.y(), localA.z()}, frame.GetRot()),
+                fb({localB.x(), localB.y(), localB.z()}, frame.GetRot());
+            if (link.type == Link::Type::Rotation)
+                chronoLink->Initialize(b, a, false, fb, fa);
+            else
+                chronoLink->Initialize(a, b, false, fa, fb);
+            sys.AddLink(chronoLink);
         }
         // Stiff public load contributes genuine off-diagonal FEM/rigid Jacobian blocks.
         auto loads = chrono_types::make_shared<chrono::ChLoadContainer>();
@@ -282,10 +325,22 @@ bool Physics::start(const Scene &source, QString *error, HscOptions options) {
                 throw std::runtime_error("FEM attachment must refer to an existing dynamic rigid body ID.");
             if (!std::isfinite(o.attachmentStiffness) || o.attachmentStiffness < 1 || o.attachmentStiffness > 1e8)
                 throw std::runtime_error("FEM attachment stiffness must be between 1 and 1e8 N/m.");
-            QVector3D lo(1e30f,1e30f,1e30f),hi(-1e30f,-1e30f,-1e30f);
-            for(auto p:binding.visual.mesh->positions)for(int k=0;k<3;++k){lo[k]=std::min(lo[k],p[k]);hi[k]=std::max(hi[k],p[k]);}
-            QVector3D attachmentPoint((lo.x()+hi.x())*.5f,hi.y(),(lo.z()+hi.z())*.5f);int center=0;float nearest=std::numeric_limits<float>::infinity();
-            for(int i=0;i<binding.visual.mesh->positions.size();++i){float distance=(binding.visual.mesh->positions[i]-attachmentPoint).lengthSquared();if(distance<nearest){nearest=distance;center=i;}}
+            QVector3D lo(1e30f, 1e30f, 1e30f), hi(-1e30f, -1e30f, -1e30f);
+            for (auto p : binding.visual.mesh->positions)
+                for (int k = 0; k < 3; ++k) {
+                    lo[k] = std::min(lo[k], p[k]);
+                    hi[k] = std::max(hi[k], p[k]);
+                }
+            QVector3D attachmentPoint((lo.x() + hi.x()) * .5f, hi.y(), (lo.z() + hi.z()) * .5f);
+            int center = 0;
+            float nearest = std::numeric_limits<float>::infinity();
+            for (int i = 0; i < binding.visual.mesh->positions.size(); ++i) {
+                float distance = (binding.visual.mesh->positions[i] - attachmentPoint).lengthSquared();
+                if (distance < nearest) {
+                    nearest = distance;
+                    center = i;
+                }
+            }
             auto node = binding.nodes[size_t(center)];
             auto body = next->bodies[size_t(target)];
             auto load = chrono_types::make_shared<chrono::ChLoadNodeXYZBodyBushing>(node, body);
@@ -305,6 +360,9 @@ bool Physics::start(const Scene &source, QString *error, HscOptions options) {
                 "HSC CPU reference supports at most 1536 active DOFs; lower FEM resolution or disable HSC.");
         preview.objects = std::move(runtime);
         preview.selected = source.selected;
+        preview.links = source.links;
+        preview.exclusions = source.exclusions;
+        preview.timeStep = source.timeStep;
         impl = std::move(next);
         return true;
     } catch (const std::exception &e) {
@@ -326,11 +384,12 @@ bool Physics::step(int count, QString *error) {
             *error = QStringLiteral("仿真尚未启动或步数无效");
         return false;
     }
-    if (impl->native) return impl->native->step(count,preview,error);
+    if (impl->native)
+        return impl->native->step(count, preview, error);
 #ifdef BAGUA_HAS_CHRONO
     try {
         for (int i = 0; i < count; ++i)
-            impl->system->DoStepDynamics(timeStep);
+            impl->system->DoStepDynamics(impl->dt);
         auto updated = preview.objects;
         for (int i = 0; i < updated.size(); ++i) {
             auto &o = updated[i];
@@ -360,9 +419,14 @@ bool Physics::step(int count, QString *error) {
     return false;
 #endif
 }
-QString Physics::solverDescription() const { return impl ? impl->description : QStringLiteral("模拟未开始"); }
+QString Physics::solverDescription() const {
+    if (impl && impl->native && impl->native->stats().inverseFallbacks)
+        return impl->description + QStringLiteral(" · 自适应逆未收敛，已使用固定项数 Neumann");
+    return impl ? impl->description : QStringLiteral("模拟未开始");
+}
 bool Physics::hscActive() const {
-    if (impl && impl->native) return true;
+    if (impl && impl->native)
+        return true;
 #ifdef BAGUA_HAS_CHRONO
     return impl && bool(impl->hsc);
 #else
@@ -370,11 +434,22 @@ bool Physics::hscActive() const {
 #endif
 }
 HscStats Physics::hscStats() const {
-    if (impl && impl->native) return impl->native->stats();
+    if (impl && impl->native)
+        return impl->native->stats();
 #ifdef BAGUA_HAS_CHRONO
     return impl && impl->hsc ? impl->hsc->stats : HscStats{};
 #else
     return {};
 #endif
+}
+QVector<LinkStat> Physics::linkStats() const {
+    if (impl && impl->native)
+        return impl->native->linkStats();
+    return {};
+}
+double Physics::stepSize() const {
+    if (impl && impl->native)
+        return impl->native->stepSize();
+    return impl ? impl->dt : timeStep;
 }
 } // namespace bagua
