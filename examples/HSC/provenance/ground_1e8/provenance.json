@@ -1,0 +1,30 @@
+{
+  "backend_sha256": "00b7948774882818f3a6620bd05ceac825f26726a902c8affedc4533cb449903",
+  "runtime": {
+    "root": "E:\\HC-HSC-build-jaq6yw9h",
+    "runtime": "E:\\HC-HSC-build-jaq6yw9h\\build\\python\\src",
+    "python": "E:\\HC-HSC-build-jaq6yw9h\\venv\\Scripts\\python.exe",
+    "source_commit": "9c748a759bb9952a7aeedd59076a70591dc61d6c",
+    "solver": "linear_hsc"
+  },
+  "source_sha256": {
+    "reproduction\\experiments\\vehicle_full_pass\\config.json": "bb37511b1ad620012395bd5b4620776c3a840c5276f7254eff280c2e3a7fa136",
+    "reproduction\\experiments\\vehicle_full_pass\\run_case.py": "7182a415607460e2f5b73f79e43001603116af54c4c89dc4a6938ee5a080eaa7",
+    "reproduction\\experiments\\vehicle_full_pass\\completion.py": "b530a8937fdee70819eed2fab923915a349cc73e67414891448d8c90fd57b1ea",
+    "reproduction\\experiments\\vehicle_full_pass\\storage.py": "5c3a768d46c0317b5db1cdfe3a55e6275f160f80cf8f553f307136a38d9aa9e1",
+    "reproduction\\vehicle_assembly\\scene.py": "f8d46a4006e75804b12eca7a45be9e8d3f1077ebfa43d47b35a864c07e890590",
+    "reproduction\\hsc_backend\\linear_hsc.cu": "e5aebeb62b23cf98d94f0e532b99d9cea667dd0cc5b96bc63509ee36b0d0293b",
+    "reproduction\\hsc_backend\\integration.patch": "36c71a39d8cdc6b1f60ff27590da51fb3cd2fb42219e9932b904f7cbec882de7",
+    "reproduction\\hsc_backend\\patch_manifest.json": "bdb05fad13e0061bb0eb6b1a52699ecb0fa979cef9fbda1a4a8bea24065c3937",
+    "reproduction\\hsc_backend\\log_nh_check.json": "3f4ad1729969659dbd1468afa3826e2f81046c97bbda5a68b2f0359449a759c6",
+    "reproduction\\hsc_backend\\overlays\\include\\uipc\\constitution\\log_neo_hookean.h": "1c1b76916f118f636474a2ec65b7f1edc6e44d965af5308fc2cc32365a771786",
+    "reproduction\\hsc_backend\\overlays\\src\\backends\\cuda\\finite_element\\constitutions\\log_neo_hookean_3d.cu": "64208b319619fcb97a3d6197020905fa9c7926fa43e4f0b0001379184f257959",
+    "reproduction\\hsc_backend\\overlays\\src\\backends\\cuda\\finite_element\\constitutions\\log_neo_hookean_function.h": "26a84dff87944d8cdf9d06cb7e3bdde08c7b03fff3df9b85f0e9245a4ee67752",
+    "reproduction\\hsc_backend\\overlays\\src\\constitution\\log_neo_hookean.cpp": "8fdd6037fbefff95c2b3bcb9c98624699803f1abdc20536663c95eb857834387",
+    "reproduction\\hsc_backend\\overlays\\src\\pybind\\pyuipc\\constitution\\log_neo_hookean.cpp": "9dac30fd079ea720d9dc1839392c8a32ee761b46f6f0a5aad76c122d66a03ad8",
+    "reproduction\\hsc_backend\\overlays\\src\\pybind\\pyuipc\\constitution\\log_neo_hookean.h": "e7a3227da3ab516de21a99dbc46faa1f85b3a0af625f83be7cd73a771910a8c1"
+  },
+  "native_workspace": "E:\\HC-HSC-build-jaq6yw9h\\runs\\vehicle_full_pass_noninverting\\ground_1e8",
+  "config_sha256": "1dfafff19a2773e2384cc32ea9777d63305062c48688bfe5177eeb313a28f2f2",
+  "snapshot_dtype": "float32 (visualization); solver and measurements use float64"
+}

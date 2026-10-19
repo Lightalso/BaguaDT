@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "experiment": "vehicle_full_pass_noninverting",
+  "description": "User-selected comparison: mounted E=1e10 Pa; only ground-tire Young's modulus differs.",
+  "result_directory": "result/vehicle_full_pass",
+  "dt": 0.03333333333333333,
+  "obstacles": 3,
+  "start_x": -2.6,
+  "motor_speed_rad_s": 2.0,
+  "motor_ramp_time_s": 0.5,
+  "max_frames": 600,
+  "snapshot_every": 2,
+  "checkpoint_every": 10,
+  "newton_max_iter": 400,
+  "material_model": "log_neo_hookean",
+  "clearance_m": 0.15,
+  "clear_frames": 5,
+  "materials": {
+    "mounted_E": 10000000000.0,
+    "poisson": 0.3,
+    "density": 1000.0,
+    "abd_kappa": 1000000000.0,
+    "bead_k": 100000000.0
+  },
+  "hsc": {
+    "max_rank": 256,
+    "neumann_order": 5,
+    "omega": 0.7,
+    "adaptive_abd_inverse": 1,
+    "abd_inverse_tol": 1e-05,
+    "full_residual_limit": 0.1,
+    "max_iter": 12000
+  },
+  "cases": [
+    {
+      "id": "ground_1e8",
+      "loose_E": 100000000.0
+    },
+    {
+      "id": "ground_1e6",
+      "loose_E": 1000000.0
+    }
+  ],
+  "paper_mapping": {
+    "dt": "HC.pdf Table 1: both Vehicle rows use 1/30 s.",
+    "mounted_E": "HC.pdf Fig.19: mounted tires E=1e10 Pa, fixed in both cases by user selection.",
+    "loose_E": "HC.pdf Fig.19 baseline E=1e8 Pa; E=1e6 Pa is the user-selected softer comparison, not an author-reported vehicle case.",
+    "solver": "HSC ACA + Schur PCG + Neumann. Adaptive ABD polynomial extension and CPU setup are local deviations.",
+    "geometry": "Chrono replacement; one row of three loose wheels, not the unpublished full paper mesh/layout."
+  },
+  "case": {
+    "id": "ground_1e8",
+    "loose_E": 100000000.0
+  }
+}

@@ -1,0 +1,148 @@
+{
+  "format": "baguadt.scene",
+  "version": 1,
+  "units": "m",
+  "upAxis": "Y",
+  "selected": "block",
+  "view": {
+    "target": [
+      0,
+      0.5,
+      0
+    ],
+    "yaw": 32,
+    "pitch": 20,
+    "distance": 4.2,
+    "grid": true
+  },
+  "objects": [
+    {
+      "id": "ground",
+      "name": "地面",
+      "shape": "plane",
+      "position": [
+        0,
+        -0.05,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "dimensions": [
+        8,
+        1,
+        8
+      ],
+      "linearVelocity": [
+        0,
+        0,
+        0
+      ],
+      "angularVelocity": [
+        0,
+        0,
+        0
+      ],
+      "color": "#d8dfe5",
+      "visible": true,
+      "fixed": true,
+      "collisionEnabled": true,
+      "mass": 1
+    },
+    {
+      "id": "base",
+      "name": "弹性基座 · 底面约束",
+      "shape": "box",
+      "position": [
+        0,
+        0.2,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "dimensions": [
+        2,
+        0.4,
+        2
+      ],
+      "linearVelocity": [
+        0,
+        0,
+        0
+      ],
+      "angularVelocity": [
+        0,
+        0,
+        0
+      ],
+      "color": "#53b8b0",
+      "visible": true,
+      "fixed": false,
+      "collisionEnabled": true,
+      "mass": 40,
+      "fem": {
+        "youngModulus": 20000,
+        "poissonRatio": 0.3,
+        "resolution": 2,
+        "pinBottom": true,
+        "attachmentBody": "",
+        "attachmentStiffness": 20000
+      }
+    },
+    {
+      "id": "block",
+      "name": "落体 · 12 自由度刚体",
+      "shape": "box",
+      "position": [
+        0.45,
+        1.1,
+        0.25
+      ],
+      "rotation": [
+        0,
+        18,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "dimensions": [
+        0.4,
+        0.4,
+        0.4
+      ],
+      "linearVelocity": [
+        -0.35,
+        0,
+        -0.2
+      ],
+      "angularVelocity": [
+        0,
+        0,
+        0
+      ],
+      "color": "#e5ad63",
+      "visible": true,
+      "fixed": false,
+      "collisionEnabled": true,
+      "mass": 2
+    }
+  ]
+}

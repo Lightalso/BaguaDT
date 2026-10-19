@@ -1,0 +1,719 @@
+{
+  "model": "Chrono-derived replacement with explicit bead attachment; NOT paper-exact",
+  "profile": "paper_stiffness",
+  "config": {
+    "cfl": {
+      "enable": 0
+    },
+    "collision_detection": {
+      "method": "stackless_bvh"
+    },
+    "contact": {
+      "adaptive": {
+        "init_kappa": 1000000000.0,
+        "kappa_eval_scale": 1e-16,
+        "max_kappa": 100000000000.0,
+        "min_kappa": 100000000.0
+      },
+      "al-ipc": {
+        "alpha_lower_bound": 1e-06,
+        "decay_factor": 0.3,
+        "mu_scale_abd": 100000.0,
+        "mu_scale_diag_norm": 0.1,
+        "mu_scale_fem": 50000000.0,
+        "mu_scale_mode": "per_vertex",
+        "toi_threshold": 0.1
+      },
+      "constitution": "ipc",
+      "d_hat": 0.001,
+      "d_hat_relative": 0.0,
+      "enable": 1,
+      "eps_velocity": 0.01,
+      "eps_velocity_relative": 0.0,
+      "friction": {
+        "enable": true
+      }
+    },
+    "diff_sim": {
+      "enable": 0
+    },
+    "dt": 0.03333333333333333,
+    "extras": {
+      "debug": {
+        "dump_linear_pcg": 0,
+        "dump_linear_system": 0,
+        "dump_mas_matrices": 0,
+        "dump_surface": 0
+      },
+      "strict_mode": {
+        "enable": 1
+      }
+    },
+    "gravity": [
+      [
+        0.0
+      ],
+      [
+        0.0
+      ],
+      [
+        -9.8
+      ]
+    ],
+    "integrator": {
+      "type": "bdf1"
+    },
+    "line_search": {
+      "max_iter": 32,
+      "report_energy": 0
+    },
+    "linear_system": {
+      "check_interval": 5,
+      "fem_preconditioner": "diag",
+      "hsc": {
+        "abd_inverse_tol": 1e-05,
+        "adaptive_abd_inverse": 1,
+        "full_residual_limit": 0.1,
+        "max_iter": 12000,
+        "max_rank": 256,
+        "neumann_order": 5,
+        "omega": 0.7
+      },
+      "solver": "linear_hsc",
+      "tol_rate": 0.0001,
+      "use_cuda_graph": 1
+    },
+    "newton": {
+      "ccd_tol": 1.0,
+      "max_iter": 400,
+      "min_iter": 0,
+      "semi_implicit": {
+        "K_min": 6,
+        "beta_tol": 0.001,
+        "enable": 0
+      },
+      "transrate_tol": 0.1,
+      "use_adaptive_tol": 0,
+      "velocity_tol": 0.003,
+      "velocity_tol_relative": 0.0
+    },
+    "sanity_check": {
+      "enable": 1,
+      "mode": "normal"
+    }
+  },
+  "materials": {
+    "mounted_E": 10000000000.0,
+    "loose_E": 100000000.0,
+    "poisson": 0.3,
+    "density": 1000.0,
+    "abd_kappa": 1000000000.0,
+    "bead_k": 100000000.0
+  },
+  "material_model": "log_neo_hookean",
+  "bodies": [
+    {
+      "name": "chassis",
+      "mass_kg": 2086.52,
+      "transform": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          -2.6
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.505
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "vertices": 287,
+      "surface_triangles": 562,
+      "virtual_anchors": 4
+    },
+    {
+      "name": "wheel_0_rim",
+      "mass_kg": 18.8,
+      "transform": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          -0.9510350000000001
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          -0.91
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.479
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "vertices": 137,
+      "surface_triangles": 192,
+      "virtual_anchors": 39
+    },
+    {
+      "name": "spindle_0",
+      "mass_kg": 34.155,
+      "transform": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          -0.9510350000000001
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          -0.91
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.479
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "vertices": 9,
+      "surface_triangles": 12,
+      "virtual_anchors": 1
+    },
+    {
+      "name": "wheel_1_rim",
+      "mass_kg": 18.8,
+      "transform": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          -0.9510350000000001
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.91
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.479
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "vertices": 137,
+      "surface_triangles": 192,
+      "virtual_anchors": 39
+    },
+    {
+      "name": "spindle_1",
+      "mass_kg": 34.155,
+      "transform": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          -0.9510350000000001
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.91
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.479
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "vertices": 9,
+      "surface_triangles": 12,
+      "virtual_anchors": 1
+    },
+    {
+      "name": "wheel_2_rim",
+      "mass_kg": 18.8,
+      "transform": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          -4.252965
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          -0.91
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.479
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "vertices": 137,
+      "surface_triangles": 192,
+      "virtual_anchors": 39
+    },
+    {
+      "name": "spindle_2",
+      "mass_kg": 34.155,
+      "transform": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          -4.252965
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          -0.91
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.479
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "vertices": 9,
+      "surface_triangles": 12,
+      "virtual_anchors": 1
+    },
+    {
+      "name": "wheel_3_rim",
+      "mass_kg": 18.8,
+      "transform": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          -4.252965
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.91
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.479
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "vertices": 137,
+      "surface_triangles": 192,
+      "virtual_anchors": 39
+    },
+    {
+      "name": "spindle_3",
+      "mass_kg": 34.155,
+      "transform": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          -4.252965
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.91
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.479
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "vertices": 9,
+      "surface_triangles": 12,
+      "virtual_anchors": 1
+    },
+    {
+      "name": "loose_0_rim",
+      "mass_kg": 18.8,
+      "transform": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          -1.0,
+          -1.01
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.17857911662527892
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "vertices": 137,
+      "surface_triangles": 192,
+      "virtual_anchors": 39
+    },
+    {
+      "name": "loose_1_rim",
+      "mass_kg": 18.8,
+      "transform": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          -1.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.17857911662527892
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "vertices": 137,
+      "surface_triangles": 192,
+      "virtual_anchors": 39
+    },
+    {
+      "name": "loose_2_rim",
+      "mass_kg": 18.8,
+      "transform": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          -1.0,
+          1.01
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.17857911662527892
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "vertices": 137,
+      "surface_triangles": 192,
+      "virtual_anchors": 39
+    }
+  ],
+  "wheels": [
+    {
+      "name": "wheel_0",
+      "vertices": 3548,
+      "tets": 11171,
+      "bead_nodes": 39,
+      "tire_mass_kg": 63.80946660623319
+    },
+    {
+      "name": "wheel_1",
+      "vertices": 3548,
+      "tets": 11171,
+      "bead_nodes": 39,
+      "tire_mass_kg": 63.8094666062332
+    },
+    {
+      "name": "wheel_2",
+      "vertices": 3548,
+      "tets": 11171,
+      "bead_nodes": 39,
+      "tire_mass_kg": 63.8094666062332
+    },
+    {
+      "name": "wheel_3",
+      "vertices": 3548,
+      "tets": 11171,
+      "bead_nodes": 39,
+      "tire_mass_kg": 63.8094666062332
+    },
+    {
+      "name": "loose_0",
+      "vertices": 3548,
+      "tets": 11171,
+      "bead_nodes": 39,
+      "tire_mass_kg": 63.809466606233215
+    },
+    {
+      "name": "loose_1",
+      "vertices": 3548,
+      "tets": 11171,
+      "bead_nodes": 39,
+      "tire_mass_kg": 63.8094666062332
+    },
+    {
+      "name": "loose_2",
+      "vertices": 3548,
+      "tets": 11171,
+      "bead_nodes": 39,
+      "tire_mass_kg": 63.8094666062332
+    }
+  ],
+  "suspensions": [
+    {
+      "name": "suspension_0",
+      "spring_k_N_m": 45374.0375,
+      "spring_rest_m": 0.46266297384269583,
+      "damping_N_s_m": 4753.8923,
+      "travel_limits_m": [
+        -0.15,
+        0.15
+      ],
+      "motor_rad_s": 2.0
+    },
+    {
+      "name": "suspension_1",
+      "spring_k_N_m": 45374.0375,
+      "spring_rest_m": 0.46266297384269583,
+      "damping_N_s_m": 4753.8923,
+      "travel_limits_m": [
+        -0.15,
+        0.15
+      ],
+      "motor_rad_s": 2.0
+    },
+    {
+      "name": "suspension_2",
+      "spring_k_N_m": 45374.0375,
+      "spring_rest_m": 0.46266297384269583,
+      "damping_N_s_m": 4753.8923,
+      "travel_limits_m": [
+        -0.15,
+        0.15
+      ],
+      "motor_rad_s": 2.0
+    },
+    {
+      "name": "suspension_3",
+      "spring_k_N_m": 45374.0375,
+      "spring_rest_m": 0.46266297384269583,
+      "damping_N_s_m": 4753.8923,
+      "travel_limits_m": [
+        -0.15,
+        0.15
+      ],
+      "motor_rad_s": 2.0
+    }
+  ],
+  "contact_exclusions": [
+    {
+      "a": "chassis",
+      "b": "spindle_0",
+      "reason": "prismatic guide and slider are joined, with intentional proxy overlap"
+    },
+    {
+      "a": "spindle_0",
+      "b": "wheel_0_rim",
+      "reason": "revolute spindle occupies the hub cavity"
+    },
+    {
+      "a": "chassis",
+      "b": "spindle_1",
+      "reason": "prismatic guide and slider are joined, with intentional proxy overlap"
+    },
+    {
+      "a": "spindle_1",
+      "b": "wheel_1_rim",
+      "reason": "revolute spindle occupies the hub cavity"
+    },
+    {
+      "a": "chassis",
+      "b": "spindle_2",
+      "reason": "prismatic guide and slider are joined, with intentional proxy overlap"
+    },
+    {
+      "a": "spindle_2",
+      "b": "wheel_2_rim",
+      "reason": "revolute spindle occupies the hub cavity"
+    },
+    {
+      "a": "chassis",
+      "b": "spindle_3",
+      "reason": "prismatic guide and slider are joined, with intentional proxy overlap"
+    },
+    {
+      "a": "spindle_3",
+      "b": "wheel_3_rim",
+      "reason": "revolute spindle occupies the hub cavity"
+    }
+  ],
+  "bindings": [
+    {
+      "name": "wheel_0_bead",
+      "pairs": 39,
+      "stiffness_N_per_m": 100000000.0,
+      "rest_length_m": 0.0
+    },
+    {
+      "name": "suspension_0_spring",
+      "pairs": 1,
+      "stiffness_N_per_m": 45374.0375,
+      "rest_length_m": 0.46266297384269583
+    },
+    {
+      "name": "wheel_1_bead",
+      "pairs": 39,
+      "stiffness_N_per_m": 100000000.0,
+      "rest_length_m": 0.0
+    },
+    {
+      "name": "suspension_1_spring",
+      "pairs": 1,
+      "stiffness_N_per_m": 45374.0375,
+      "rest_length_m": 0.46266297384269583
+    },
+    {
+      "name": "wheel_2_bead",
+      "pairs": 39,
+      "stiffness_N_per_m": 100000000.0,
+      "rest_length_m": 0.0
+    },
+    {
+      "name": "suspension_2_spring",
+      "pairs": 1,
+      "stiffness_N_per_m": 45374.0375,
+      "rest_length_m": 0.46266297384269583
+    },
+    {
+      "name": "wheel_3_bead",
+      "pairs": 39,
+      "stiffness_N_per_m": 100000000.0,
+      "rest_length_m": 0.0
+    },
+    {
+      "name": "suspension_3_spring",
+      "pairs": 1,
+      "stiffness_N_per_m": 45374.0375,
+      "rest_length_m": 0.46266297384269583
+    },
+    {
+      "name": "loose_0_bead",
+      "pairs": 39,
+      "stiffness_N_per_m": 100000000.0,
+      "rest_length_m": 0.0
+    },
+    {
+      "name": "loose_1_bead",
+      "pairs": 39,
+      "stiffness_N_per_m": 100000000.0,
+      "rest_length_m": 0.0
+    },
+    {
+      "name": "loose_2_bead",
+      "pairs": 39,
+      "stiffness_N_per_m": 100000000.0,
+      "rest_length_m": 0.0
+    }
+  ]
+}

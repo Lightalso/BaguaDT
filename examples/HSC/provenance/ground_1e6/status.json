@@ -1,0 +1,97 @@
+{
+  "status": "COMPLETED_FULL_PASS",
+  "case": "ground_1e6",
+  "solver": "linear_hsc",
+  "config_sha256": "20195b2ac113ace6d0536256d34edb676fb375b287b82beadae000b6d50cc9a3",
+  "backend_sha256": "00b7948774882818f3a6620bd05ceac825f26726a902c8affedc4533cb449903",
+  "native_workspace": "E:\\HC-HSC-build-jaq6yw9h\\runs\\vehicle_full_pass_noninverting\\ground_1e6",
+  "completed_frames": 209,
+  "simulation_time_s": 6.966666666666667,
+  "elapsed_s": 19444.569925599997,
+  "passage": {
+    "vehicle_min_x_m": 1.0707672165043274,
+    "obstacle_max_x_m": 0.7886270528867182,
+    "clearance_m": 0.2821401636176092,
+    "crossed_wheels": [
+      "wheel_0",
+      "wheel_1",
+      "wheel_2",
+      "wheel_3"
+    ],
+    "consecutive_clear_frames": 5,
+    "contact_seen": true,
+    "passed": true
+  },
+  "wheel_crossings": {
+    "wheel_0": {
+      "frame": 46,
+      "obstacle": "loose_0",
+      "wheel_center": [
+        0.2045834112789613,
+        -0.9013900454999845,
+        0.743625326382964
+      ],
+      "obstacle_center": [
+        0.18745977917293166,
+        -1.0357548448152771,
+        0.14630190729769152
+      ]
+    },
+    "wheel_1": {
+      "frame": 46,
+      "obstacle": "loose_2",
+      "wheel_center": [
+        0.20219886648405544,
+        0.9186221458163869,
+        0.7401825617926414
+      ],
+      "obstacle_center": [
+        0.18226959931956038,
+        1.014407906127024,
+        0.14006224950944027
+      ]
+    },
+    "wheel_2": {
+      "frame": 157,
+      "obstacle": "loose_0",
+      "wheel_center": [
+        0.3007706900998215,
+        -0.8999288612677192,
+        0.7443948005031423
+      ],
+      "obstacle_center": [
+        0.28885500259499275,
+        -1.0555636604925336,
+        0.1478772463292367
+      ]
+    },
+    "wheel_3": {
+      "frame": 157,
+      "obstacle": "loose_2",
+      "wheel_center": [
+        0.3037916857587089,
+        0.9200675798594276,
+        0.7410674356911103
+      ],
+      "obstacle_center": [
+        0.3000805726358368,
+        1.023240995447717,
+        0.1407502684162867
+      ]
+    }
+  },
+  "hsc": {
+    "linear_solves": 6402,
+    "fallbacks": 0,
+    "max_schur_relative_residual": 9.999943200817072e-05,
+    "max_full_relative_residual": 9.979432920855605e-05,
+    "max_pcg_iterations": 3062,
+    "max_mesh_contacts": 574,
+    "max_ground_contacts": 421,
+    "max_aca_error": 1.4690176064936188e-16,
+    "min_rank": 84,
+    "max_rank": 96,
+    "min_neumann_doublings": 13,
+    "max_neumann_doublings": 16
+  }
+}

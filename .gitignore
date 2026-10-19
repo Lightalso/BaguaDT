@@ -1,0 +1,74 @@
+# BaguaDT 忽略清单
+# 原则：只忽略本机安装、构建与运行产生的文件；源码、文档、脚本与示例数据一律入库。
+# 示例数据包括 examples/HSC 下的 .brec，因此这里不使用全局 *.brec 规则。
+
+# --- 依赖与 SDK（由 scripts 安装，不入库） ---
+.deps/
+
+# --- 构建树与分发产物 ---
+build*/
+cmake-build-*/
+out/
+dist/
+
+# --- 运行、测试与截图输出 ---
+artifacts/
+artifacts-*
+hsc-runtime-*/
+*.log
+/BaguaDT.ini
+
+# --- CMake / Ninja / CTest 生成物（防止误留在根目录） ---
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+install_manifest.txt
+compile_commands.json
+build.ninja
+rules.ninja
+.ninja_deps
+.ninja_log
+
+# --- Visual Studio / MSVC ---
+.vs/
+*.user
+*.suo
+*.sdf
+*.VC.db
+*.VC.opendb
+*.ipch
+*.ncb
+*.aps
+*.tlog
+*.pdb
+*.ilk
+*.exp
+
+# --- Python（scripts 下的辅助脚本） ---
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# --- 编辑器与系统文件 ---
+.idea/
+.vscode/
+*~
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- 本机工作文件 ---
+# 沙箱文件权限修复的备份与回滚记录：属于本机环境状态，不是工程内容。
+.acl-recovery/
+# 本机对话/笔记存档。若要把它纳入版本库，删除下面这一行即可。
+gpt对话历史.md
+# 直接在仓库根目录生成的录制结果；示例数据在 examples/ 下，不受影响。
+/*.brec
+
+# --- 不要忽略的格式 ---
+# *.obj / *.stl / *.ply 是本程序导入的网格资产格式，与编译器中间文件同名，
+# 因此不加入忽略列表；编译产物已由 build*/ 与 dist/ 覆盖。

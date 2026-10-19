@@ -1,0 +1,16 @@
+[
+  {
+    "port": "fmt",
+    "version": "10.2.1",
+    "git_tree": "405156a2b01c91258bf66768ceb3ae75c1caba7f"
+  },
+  {
+    "port": "spdlog",
+    "version": "1.12.0",
+    "git_tree": "41cf31aa350a44644863d7777489501d240f248c"
+  },
+  {
+    "port": "octree",
+    "registry_commit": "7a5a8167ff2159564076a3e0f4b025695e9df91e"
+  }
+]

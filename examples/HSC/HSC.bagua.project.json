@@ -1,0 +1,15 @@
+{
+  "format": "baguadt.project",
+  "version": 1,
+  "name": "HSC 车辆越障复现 · 完整运行结果",
+  "scenes": [
+    {
+      "name": "HSC · 地面胎 E=1e8 Pa",
+      "recording": "ground_1e8.brec"
+    },
+    {
+      "name": "HSC · 地面胎 E=1e6 Pa",
+      "recording": "ground_1e6.brec"
+    }
+  ]
+}

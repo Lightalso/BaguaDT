@@ -1,0 +1,11 @@
+{
+  "format": "baguadt.scene", "version": 1, "units": "m", "upAxis": "Y", "selected": "box",
+  "view": {"target": [0, 1.5, 0], "yaw": 38, "pitch": 20, "distance": 15, "grid": true},
+  "objects": [
+    {"id":"ground", "name":"固定地面", "shape":"plane", "position":[0,0,0], "rotation":[0,0,0], "scale":[1,1,1], "dimensions":[16,1,12], "color":"#e3e7ec", "visible":true, "collisionEnabled":true, "fixed":true, "mass":1},
+    {"id":"box", "name":"碰撞立方体", "shape":"box", "position":[0,4,0], "rotation":[12,22,5], "scale":[1,1,1], "dimensions":[1.5,1.5,1.5], "color":"#53b8b0", "visible":true, "collisionEnabled":true, "fixed":false, "mass":2},
+    {"id":"sphere", "name":"碰撞球体", "shape":"sphere", "position":[-3,3,0], "rotation":[0,0,0], "scale":[1,1,1], "dimensions":[1.3,1.3,1.3], "color":"#e5ad63", "visible":true, "collisionEnabled":true, "fixed":false, "mass":1},
+    {"id":"cylinder", "name":"碰撞圆柱", "shape":"cylinder", "position":[3,3.5,0], "rotation":[0,0,10], "scale":[1,1,1], "dimensions":[1.1,1.8,1.1], "color":"#809fe8", "visible":true, "collisionEnabled":true, "fixed":false, "mass":3},
+    {"id":"ghost", "name":"关闭碰撞 · 穿过地面", "shape":"sphere", "position":[-3,3,3], "rotation":[0,0,0], "scale":[1,1,1], "dimensions":[1.3,1.3,1.3], "color":"#dd7995", "visible":true, "collisionEnabled":false, "fixed":false, "mass":1}
+  ]
+}
