@@ -326,7 +326,7 @@ bool MainWindow::beginRecording() {
     }
     d->captureOrigin = d->physics.time();
     d->recording().begin(d->physics.preview, {{"producer", d->physics.solverDescription().prepend("BaguaDT ")},
-                                            {"hscEnabled", d->physics.hscActive()},
+                                            {"hscEnabled", d->physics.hscActive()},{"simulation",scene->simulation},
                                             {"created", QDateTime::currentDateTimeUtc().toString(Qt::ISODate)},
                                             {"integrationStep", d->physics.stepSize()},
                                             {"sampling", d->offlineCapture ? "lock-step fixed timestep"

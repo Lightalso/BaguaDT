@@ -1,0 +1,18 @@
+{
+  "case": "ground_1e8",
+  "kind": "Chrono-derived replacement with explicit bead attachment; NOT paper-exact",
+  "source_sha256": {
+    "result\\vehicle_full_pass\\ground_1e8\\scene_manifest.json": "324fec6e9ac5e91fa498656a0b61c7a2d5e1c7c29fa9035dd18dea4276227ce2",
+    "result\\vehicle_full_pass\\ground_1e8\\geometry.npz": "0240e6e092dfdfeadee298b515736efb4aa69ba8e42a28d7dbc3c8041d947093",
+    "reproduction\\vehicle_research\\prepared\\tire_tet4.npz": "457a94c7e73545af1f42e667e028ba7c417e0ab69c223b4e2a31077194fb7024",
+    "reproduction\\vehicle_assembly\\scene.py": "b1a09d038c11069de16adcba0dfb0c3c3e5683fc70908a218ffa0c3870cf88d9",
+    "reproduction\\experiments\\vehicle_full_pass\\config.json": "bb37511b1ad620012395bd5b4620776c3a840c5276f7254eff280c2e3a7fa136"
+  },
+  "importer_sha256": "f57465bc37915ae85d1d7bdbbc43e6537525c2503436729e73080b1ac6684699",
+  "objects": 20,
+  "links": 19,
+  "tetrahedra": 78197,
+  "coordinate_conversion": "(x,y,z) -> (x,z,-y); proper rotation, no reflection",
+  "source_records_used": false,
+  "mass_kg": 2801.406266243632
+}

@@ -80,7 +80,9 @@ bool Link::operator==(const Link &other) const {
     return id == other.id && type == other.type && a == other.a && b == other.b && anchorA == other.anchorA &&
            anchorB == other.anchorB && axis == other.axis && strength == other.strength && hasLimit == other.hasLimit &&
            lower == other.lower && upper == other.upper && limitStrength == other.limitStrength &&
-           angle == other.angle && angularVelocity == other.angularVelocity && pairs == other.pairs &&
+           angle == other.angle && angularVelocity == other.angularVelocity && driven == other.driven &&
+           damped == other.damped && driveSpeed == other.driveSpeed && driveRamp == other.driveRamp &&
+           driveStrength == other.driveStrength && damping == other.damping && pairs == other.pairs &&
            anchorPairs == other.anchorPairs && stiffness == other.stiffness && rest == other.rest;
 }
 QString Link::typeKey() const {
@@ -136,6 +138,11 @@ QJsonObject linkJson(const Link &link) {
         result.insert("angle", link.angle);
         result.insert("angularVelocity", link.angularVelocity);
     }
+    if (link.driven)
+        result["drive"] =
+            QJsonObject{{"speed", link.driveSpeed}, {"ramp", link.driveRamp}, {"strength", link.driveStrength}};
+    if (link.damped)
+        result["damper"] = QJsonObject{{"coefficient", link.damping}};
     return result;
 }
 class Change final : public QUndoCommand {
@@ -347,6 +354,7 @@ void Scene::reset(bool example) {
     links = {};
     exclusions = {};
     timeStep = 1.0 / 240.0;
+    simulation = {};
     objects.clear();
     selected.clear();
     undo.clear();
@@ -403,8 +411,17 @@ QJsonObject Scene::json() const {
     QJsonArray exclusionArray;
     for (const auto &pair : exclusions)
         exclusionArray.append(QJsonObject{{"a", pair.first}, {"b", pair.second}});
-    return {{"format", "baguadt.scene"},   {"version", 1}, {"units", "m"}, {"upAxis", "Y"},    {"dt", timeStep},
-            {"selected", selected},        {"view", view}, {"objects", a}, {"assets", assets}, {"links", linkArray},
+    return {{"format", "baguadt.scene"},
+            {"version", 1},
+            {"units", "m"},
+            {"upAxis", "Y"},
+            {"dt", timeStep},
+            {"simulation", simulation},
+            {"selected", selected},
+            {"view", view},
+            {"objects", a},
+            {"assets", assets},
+            {"links", linkArray},
             {"exclusions", exclusionArray}};
 }
 bool Scene::save(const QString &path, QString *error) {
@@ -618,6 +635,8 @@ bool Scene::loadJson(const QJsonObject &root, QString *error) {
             if (link.kinematic() && (left->deformable || right->deformable))
                 return fail(QStringLiteral("运动学关节只能连接两个刚体：") + link.id);
             if (link.type == Link::Type::Stitch) {
+                if (j.contains("drive") || j.contains("damper"))
+                    return fail(QStringLiteral("缝合不支持驱动或轴向阻尼"));
                 if (!j.value("pairs").isArray() || j.value("pairs").toArray().isEmpty() ||
                     j.value("pairs").toArray().size() > 100000)
                     return fail(QStringLiteral("缝合链接需要顶点对：") + link.id);
@@ -638,7 +657,8 @@ bool Scene::loadJson(const QJsonObject &root, QString *error) {
                 if (left->deformable || (link.anchorPairs && right->deformable))
                     return fail(QStringLiteral("缝合锚点必须属于刚体"));
                 if (!link.anchorPairs) {
-                    if(!right->deformable)return fail(QStringLiteral("刚体之间的缝合请使用两侧锚点模式；网格顶点模式仅用于弹性体"));
+                    if (!right->deformable)
+                        return fail(QStringLiteral("刚体之间的缝合请使用两侧锚点模式；网格顶点模式仅用于弹性体"));
                     int count = right->mesh ? int(right->mesh->positions.size())
                                             : (right->deformable && right->shape == Shape::Box
                                                    ? (right->femResolution + 1) * (right->femResolution + 1) *
@@ -684,6 +704,29 @@ bool Scene::loadJson(const QJsonObject &root, QString *error) {
                     !std::isfinite(link.limitStrength) || link.limitStrength <= 0)
                     return fail(QStringLiteral("链接限位无效：") + link.id);
                 link.hasLimit = true;
+            }
+            if (j.contains("drive")) {
+                auto d = j["drive"].toObject();
+                if (link.type != Link::Type::Revolute && link.type != Link::Type::Prismatic)
+                    return fail(QStringLiteral("驱动仅支持转动副和移动副"));
+                link.driven = true;
+                link.driveSpeed = d["speed"].toDouble(std::numeric_limits<double>::quiet_NaN());
+                link.driveRamp = d["ramp"].toDouble(.5);
+                link.driveStrength = d["strength"].toDouble(1e4);
+                if ((d.contains("ramp") && !d["ramp"].isDouble()) ||
+                    (d.contains("strength") && !d["strength"].isDouble()) || !std::isfinite(link.driveSpeed) ||
+                    std::abs(link.driveSpeed) > 1e4 || !std::isfinite(link.driveRamp) || link.driveRamp < 0 ||
+                    !std::isfinite(link.driveStrength) || link.driveStrength <= 0)
+                    return fail(QStringLiteral("驱动参数无效"));
+            }
+            if (j.contains("damper")) {
+                auto d = j["damper"].toObject();
+                if (link.type != Link::Type::Prismatic || !d["coefficient"].isDouble())
+                    return fail(QStringLiteral("阻尼仅支持移动副"));
+                link.damped = true;
+                link.damping = d["coefficient"].toDouble(-1);
+                if (!std::isfinite(link.damping) || link.damping < 0 || link.damping > 1e9)
+                    return fail(QStringLiteral("阻尼系数无效"));
             }
             if (link.type == Link::Type::Rotation) {
                 link.angle = j.value("angle").toDouble(0);
@@ -761,6 +804,41 @@ bool Scene::loadJson(const QJsonObject &root, QString *error) {
             nextExclusions.push_back({a, b});
         }
     }
+    QJsonObject nextSimulation;
+    if (root.contains("simulation")) {
+        if (!root["simulation"].isObject())
+            return fail(QStringLiteral("模拟配置必须为对象"));
+        nextSimulation = root["simulation"].toObject();
+        const QHash<QString, QPair<double, double>> ranges{{"gravity", {0, 100}},
+                                                           {"contactDistance", {1e-6, .1}},
+                                                           {"contactFriction", {0, 2}},
+                                                           {"contactStiffness", {1, 1e14}},
+                                                           {"abdStiffness", {1, 1e14}},
+                                                           {"newtonIterations", {1, 2000}},
+                                                           {"lineSearchIterations", {1, 200}},
+                                                           {"velocityTolerance", {1e-8, 1}},
+                                                           {"maxRank", {1, 4096}},
+                                                           {"neumannTerms", {1, 32}},
+                                                           {"maxIterations", {1, 100000}},
+                                                           {"omega", {.001, 1}},
+                                                           {"linearTolerance", {1e-12, .1}}};
+        for (auto it = nextSimulation.begin(); it != nextSimulation.end(); ++it) {
+            if (it.key() == "adaptiveInverse" || it.key() == "infiniteGround") {
+                if (!it.value().isBool())
+                    return fail(QStringLiteral("模拟配置开关无效"));
+                continue;
+            }
+            if (!ranges.contains(it.key()) || !it.value().isDouble())
+                return fail(QStringLiteral("未知模拟配置：") + it.key());
+            auto r = ranges[it.key()];
+            double v = it.value().toDouble();
+            if (!std::isfinite(v) || v < r.first || v > r.second)
+                return fail(QStringLiteral("模拟配置超出范围：") + it.key());
+            if ((it.key()=="newtonIterations" || it.key()=="lineSearchIterations" || it.key()=="maxRank" || it.key()=="neumannTerms" || it.key()=="maxIterations") && std::floor(v)!=v)
+                return fail(QStringLiteral("模拟迭代次数和秩必须为整数：")+it.key());
+        }
+    }
+    simulation = nextSimulation;
     objects = std::move(next);
     links = nextLinks;
     exclusions = nextExclusions;

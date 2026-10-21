@@ -36,8 +36,8 @@ void MainWindow::loadPhysicsSettings() {
     solverOptions.omega = std::clamp(s.value("physics/omega", .7).toDouble(), .01, 1.);
     solverOptions.tolerance = std::clamp(s.value("physics/tolerance", 1e-8).toDouble(), 1e-10, 1e-3);
     solverOptions.nativeAdaptiveInverse = s.value("physics/nativeAdaptiveInverse", false).toBool();
-    solverOptions.linearTolerance = std::clamp(s.value("physics/nativeLinearTolerance", 1e-4).toDouble(),1e-8,1e-2);
-    solverOptions.maxIterations = std::clamp(s.value("physics/maxIterations",2000).toInt(),1,10000);
+    solverOptions.linearTolerance = std::clamp(s.value("physics/nativeLinearTolerance", 1e-4).toDouble(), 1e-8, 1e-2);
+    solverOptions.maxIterations = std::clamp(s.value("physics/maxIterations", 2000).toInt(), 1, 100000);
 }
 void MainWindow::setPhysicsOptions(HscOptions options) {
     solverOptions = options;
@@ -55,7 +55,8 @@ void MainWindow::showPhysicsSettings() {
     enabled.setChecked(solverOptions.enabled);
     form.addRow(QStringLiteral("刚柔耦合求解"), &enabled);
     QSpinBox rank, terms, iterations;
-    iterations.setRange(1,10000);iterations.setValue(solverOptions.maxIterations);
+    iterations.setRange(1, 100000);
+    iterations.setValue(solverOptions.maxIterations);
     rank.setRange(1, 256);
     rank.setValue(solverOptions.maxRank);
     terms.setRange(1, 32);
@@ -75,9 +76,22 @@ void MainWindow::showPhysicsSettings() {
     form.addRow(QStringLiteral("Schur PCG 相对残差"), &tolerance);
     form.addRow(QStringLiteral("PCG 迭代上限"), &iterations);
     form.addRow(&adaptive);
-    QLabel scope(QStringLiteral("开启：12 自由度 ABD、弹性体 FEM、IPC/CCD、Newton 与 CUDA HSC。\n关闭：Chrono 原有刚体 / FEM / 接触 / 关节计算链。\n此开关替换整套物理模块，两侧的物理模型并不相同。\n默认使用固定项数 Neumann；自适应延长是复现增强选项。\n回放只读取记录，不受开关影响；修改后请重置并重新开始模拟。"));
+    QLabel scope(QStringLiteral(
+        "开启：12 自由度 ABD、弹性体 FEM、IPC/CCD、Newton 与 CUDA HSC。\n关闭：Chrono 原有刚体 / FEM / 接触 / "
+        "关节计算链。\n此开关替换整套物理模块，两侧的物理模型并不相同。\n默认使用固定项数 "
+        "Neumann；自适应延长是复现增强选项。\n回放只读取记录，不受开关影响；修改后请重置并重新开始模拟。"));
     scope.setWordWrap(true);
     form.addRow(&scope);
+    if (scene && !scene->simulation.isEmpty()) {
+        auto *profile = new QLabel(
+            QStringLiteral(
+                "此场景带有专用物理参数，优先于全局默认值：ACA 秩 %1，迭代上限 %2，Newton 上限 %3。该配置随场景保存。")
+                .arg(scene->simulation["maxRank"].toInt(solverOptions.maxRank))
+                .arg(scene->simulation["maxIterations"].toInt(solverOptions.maxIterations))
+                .arg(scene->simulation["newtonIterations"].toInt(300)));
+        profile->setWordWrap(true);
+        form.addRow(profile);
+    }
     QDialogButtonBox buttons(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     form.addRow(&buttons);
     connect(&buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
@@ -99,9 +113,9 @@ void MainWindow::showPhysicsSettings() {
     s.setValue("physics/rank", options.maxRank);
     s.setValue("physics/terms", options.neumannTerms);
     s.setValue("physics/omega", options.omega);
-    s.setValue("physics/nativeLinearTolerance",options.linearTolerance);
-    s.setValue("physics/nativeAdaptiveInverse",options.nativeAdaptiveInverse);
-    s.setValue("physics/maxIterations",options.maxIterations);
+    s.setValue("physics/nativeLinearTolerance", options.linearTolerance);
+    s.setValue("physics/nativeAdaptiveInverse", options.nativeAdaptiveInverse);
+    s.setValue("physics/maxIterations", options.maxIterations);
     s.sync();
     if (s.status() != QSettings::NoError)
         log(QStringLiteral("无法写入 BaguaDT.ini；物理设置仅在本次会话生效。"));

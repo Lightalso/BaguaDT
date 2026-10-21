@@ -108,6 +108,14 @@ void MainWindow::setupMenus() {
     auto *create = menuBar()->addMenu(QStringLiteral("创建(&C)"));
     auto *view = menuBar()->addMenu(QStringLiteral("视图(&V)"));
     auto *tools = menuBar()->addMenu(QStringLiteral("工具(&T)"));
+    auto *vehicleImport=tools->addAction(QStringLiteral("导入 HSC 整车装配…"));vehicleImport->setObjectName("importHscVehicle");connect(vehicleImport,&QAction::triggered,this,&MainWindow::importHscVehicle);
+    auto *vehicleExample=tools->addAction(QStringLiteral("打开 HSC 整车仿真示例"));
+    vehicleExample->setObjectName("openHscVehicle");
+    connect(vehicleExample,&QAction::triggered,this,[this]{
+        auto path=QCoreApplication::applicationDirPath()+"/examples/hsc-vehicle/HSC-Vehicle.bagua.project.json";
+        if(!QFileInfo::exists(path))path=QDir::currentPath()+"/examples/hsc-vehicle/HSC-Vehicle.bagua.project.json";
+        if(openPath(path)){auto options=physicsOptions();options.enabled=true;setPhysicsOptions(options);}
+    });
     auto *settings = tools->addAction(QStringLiteral("物理模拟设置…"));
     settings->setObjectName("physicsSettings");
     connect(settings, &QAction::triggered, this, &MainWindow::showPhysicsSettings);
@@ -1024,12 +1032,13 @@ void MainWindow::closeEvent(QCloseEvent *e) {
 void MainWindow::validate() {
     auto r = validateBackends(*scene);
     log(r.cuda);
-    log(QStringLiteral("后端自检：") + r.chrono);
+    if(!physicsOptions().enabled)log(QStringLiteral("Chrono 自检：") + r.chrono);
+    else log(QStringLiteral("当前选择 HSC 原生物理链（ABD / FEM / IPC / CCD）。开始模拟时检查原生场景有效性。"));
     if (simulationActive())
         log(activeDocument()->physics.solverDescription());
     log(activeDocument() && activeDocument()->replayActive
             ? QStringLiteral("当前为保存结果回放：请使用底部记录栏播放、暂停和逐帧控制；顶栏仅控制物理模拟。")
-            : QStringLiteral("F5 启动 Chrono 刚体仿真；F6 暂停；F7 单步；F8 重置。"));
+            : QStringLiteral("F5 启动%1物理模拟；F6 暂停；F7 单步；F8 重置。").arg(physicsOptions().enabled?QStringLiteral(" HSC "):QStringLiteral(" Chrono ")));
 }
 bool MainWindow::simulationActive() const {
     auto *d = activeDocument();

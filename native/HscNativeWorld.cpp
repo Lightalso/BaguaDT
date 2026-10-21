@@ -3,6 +3,7 @@
 #include <Eigen/Dense>
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <limits>
@@ -11,8 +12,11 @@
 #include <set>
 #include <uipc/common/uipc.h>
 #include <uipc/constitution/affine_body_constitution.h>
+#include <uipc/constitution/affine_body_driving_prismatic_joint.h>
+#include <uipc/constitution/affine_body_driving_revolute_joint.h>
 #include <uipc/constitution/affine_body_fixed_joint.h>
 #include <uipc/constitution/affine_body_prismatic_joint.h>
+#include <uipc/constitution/affine_body_prismatic_joint_external_force.h>
 #include <uipc/constitution/affine_body_prismatic_joint_limit.h>
 #include <uipc/constitution/affine_body_revolute_joint.h>
 #include <uipc/constitution/affine_body_revolute_joint_limit.h>
@@ -49,6 +53,7 @@ struct Binding {
     S<SimplicialComplexSlot> slot;
     bool affine = false;
     std::vector<int> anchors;
+    std::vector<Vector3> staticPositions;
 };
 // Runtime record of one authored link, kept for per-step diagnostics.
 struct LinkRecord {
@@ -61,6 +66,10 @@ struct LinkRecord {
     std::vector<Vector2i> pairs;
     Vector3 anchorA = Vector3::Zero(), anchorB = Vector3::Zero(), axisA = Vector3::UnitZ();
 };
+struct Control {
+    bool driven = false, damped = false;
+    double speed = 0, ramp = 0, aim = 0, last = 0, velocity = 0, force = 0, coefficient = 0;
+};
 struct NativeWorld {
     std::unique_ptr<Engine> engine;
     std::unique_ptr<Scene> scene;
@@ -68,12 +77,15 @@ struct NativeWorld {
     std::vector<Binding> bindings;
     std::vector<LinkRecord> linkRecords;
     std::string state;
+    std::map<std::string, std::shared_ptr<Control>> controls;
     double dt = 1. / 240.;
     std::map<std::string, size_t> byId;
     explicit NativeWorld(const Json &input, const std::string &workspace) {
         auto global = default_config();
         global["module_dir"] = input.at("moduleDir");
         uipc::init(global);
+        if (std::getenv("BAGUA_HSC_QUIET"))
+            uipc::logger::set_level(Logger::Level::warn);
         std::filesystem::create_directories(workspace);
         engine = std::make_unique<Engine>("cuda", workspace);
         auto config = Scene::default_config();
@@ -81,19 +93,21 @@ struct NativeWorld {
         dt = input.value("dt", dt);
         require(dt > 0 && dt <= .1, "Invalid HSC timestep");
         config["dt"] = dt;
-        config["gravity"] = Vector3(0, -9.81, 0);
+        config["gravity"] = Vector3(0, -options.value("gravity", 9.81), 0);
         config["contact"]["enable"] = true;
         config["contact"]["friction"]["enable"] = true;
         config["contact"]["d_hat"] = options.value("contactDistance", .001);
         config["linear_system"]["solver"] = "linear_hsc";
+        config["linear_system"]["fem_preconditioner"] = "diag";
         config["linear_system"]["tol_rate"] = options.value("linearTolerance", 1e-4);
         config["linear_system"]["hsc"] = {{"max_rank", options.value("maxRank", 48)},
                                           {"neumann_order", options.value("neumannTerms", 5)},
                                           {"max_iter", options.value("maxIterations", 2000)},
                                           {"omega", options.value("omega", .7)},
                                           {"adaptive_abd_inverse", options.value("adaptiveInverse", false) ? 1 : 0}};
-        config["line_search"]["max_iter"] = 64;
-        config["newton"]["max_iter"] = 300;
+        config["line_search"]["max_iter"] = options.value("lineSearchIterations", 64);
+        config["newton"]["max_iter"] = options.value("newtonIterations", 300);
+        config["newton"]["velocity_tol"] = options.value("velocityTolerance", .1);
         config["newton"]["semi_implicit"]["enable"] = 0;
         config["extras"]["strict_mode"]["enable"] = 1;
         scene = std::make_unique<Scene>(config);
@@ -116,7 +130,7 @@ struct NativeWorld {
         scene->constitution_tabular().insert(fixedJoint);
         scene->constitution_tabular().insert(rotation);
         auto &contacts = scene->contact_tabular();
-        contacts.default_model(.5, options.value("contactStiffness", 1e8));
+        contacts.default_model(options.value("contactFriction", .5), options.value("contactStiffness", 1e8));
         // Anchors must never collide: they are coincident with the surface by design.
         auto virtualElement = contacts.create("virtual_anchor");
         std::vector<ContactElement> elements;
@@ -128,6 +142,25 @@ struct NativeWorld {
             for (const auto &v : object.at("positions"))
                 vertices.push_back(vector3(v));
             require(!vertices.empty(), "HSC geometry has no vertices");
+            if (object.value("halfPlane", false)) {
+                auto mesh = ground(object.value("height", 0.), Vector3(0, 1, 0));
+                auto element = contacts.create(id);
+                element.apply_to(mesh);
+                elements.push_back(element);
+                collision.push_back(object.value("collision", true));
+                scene->objects().create(id)->geometries().create(mesh);
+                Matrix4x4 pose;
+                for (int r = 0; r < 4; ++r)
+                    for (int c = 0; c < 4; ++c)
+                        pose(r, c) = object.at("transform")[r * 4 + c].get<Float>();
+                Binding binding;
+                binding.id = id;
+                for (auto p : vertices)
+                    binding.staticPositions.push_back((pose * Vector4(p[0], p[1], p[2], 1)).head<3>());
+                byId[id] = bindings.size();
+                bindings.push_back(std::move(binding));
+                continue;
+            }
             bool elastic = object.value("deformable", false);
             SimplicialComplex mesh = [&]() {
                 if (elastic) {
@@ -227,6 +260,7 @@ struct NativeWorld {
             elements.push_back(element);
             collision.push_back(object.value("collision", true));
             std::vector<int> anchors;
+            std::vector<Vector3> staticPositions;
             for (const auto &value : object.value("anchors", Json::array())) {
                 int index = value.get<int>();
                 require(index >= 0 && size_t(index) < vertices.size(), "Anchor index out of range");
@@ -388,7 +422,50 @@ struct NativeWorld {
                 else
                     revoluteLimit.apply_to(geometry, Float(lower), Float(upper), limitStrength);
             }
-            auto slots = scene->objects().create(id)->geometries().create(geometry);
+            auto control = std::make_shared<Control>();
+            if (link.contains("drive")) {
+                auto d = link.at("drive");
+                control->driven = true;
+                control->speed = d.at("speed");
+                control->ramp = d.value("ramp", .5);
+                if (type == "revolute")
+                    AffineBodyDrivingRevoluteJoint().apply_to(geometry, d.value("strength", 1e4));
+                else if (type == "prismatic")
+                    AffineBodyDrivingPrismaticJoint().apply_to(geometry, d.value("strength", 1e4));
+                else
+                    throw std::runtime_error("Unsupported driven link");
+                view(*geometry.edges().find<IndexT>("driving/is_constrained"))[0] = 1;
+            }
+            if (link.contains("damper")) {
+                require(type == "prismatic", "Damper requires prismatic link");
+                control->damped = true;
+                control->coefficient = link.at("damper").at("coefficient");
+                AffineBodyPrismaticJointExternalForce().apply_to(geometry, 0.);
+                view(*geometry.edges().find<IndexT>("external_force/is_constrained"))[0] = 1;
+            }
+            auto obj = scene->objects().create(id);
+            auto slots = obj->geometries().create(geometry);
+            if (control->driven || control->damped) {
+                controls[id] = control;
+                scene->animator().insert(*obj, [control, type](Animation::UpdateInfo &info) {
+                    auto *geo = info.geo_slots()[0]->geometry().as<SimplicialComplex>();
+                    if (control->driven) {
+                        double t = info.dt() * info.frame(), r = control->ramp;
+                        double phase = r <= 0 ? t : (t < r ? t * t / (2 * r) : t - r / 2);
+                        control->aim = control->speed * phase;
+                        view(*geo->edges().find<Float>(type == "revolute" ? "aim_angle" : "aim_distance"))[0] =
+                            control->aim;
+                    }
+                    if (control->damped) {
+                        double distance = geo->edges().find<Float>("distance")->view()[0];
+                        control->velocity = (distance - control->last) / info.dt();
+                        control->force = -control->coefficient * control->velocity;
+                        view(*geo->edges().find<Float>("external_force"))[0] = control->force;
+                        control->last = distance;
+                    }
+                });
+            }
+
             linkRecords.push_back({id, type, slots.geometry, 0., limited, lower, upper, byId.at(a), byId.at(b), {}});
             auto &record = linkRecords.back();
             record.anchorA = anchorA;
@@ -408,6 +485,13 @@ struct NativeWorld {
                        {"objects", Json::array()},
                        {"engineStats", engine->frame_stats()}};
         for (const auto &binding : bindings) {
+            if (!binding.slot) {
+                Json values = Json::array();
+                for (auto p : binding.staticPositions)
+                    values.push_back({p[0], p[1], p[2]});
+                result["objects"].push_back({{"id", binding.id}, {"positions", values}});
+                continue;
+            }
             const auto &mesh = binding.slot->geometry();
             auto positions = mesh.positions().view();
             Json values = Json::array();
@@ -463,6 +547,13 @@ struct NativeWorld {
                     entry["limitLower"] = record.lower;
                     entry["limitUpper"] = record.upper;
                 }
+            }
+            if (auto it = controls.find(record.id); it != controls.end()) {
+                auto &c = *it->second;
+                entry["aim"] = c.aim;
+                entry["velocity"] = c.velocity;
+                entry["force"] = c.force;
+                entry["previousDistance"] = c.last;
             }
             links.push_back(entry);
         }

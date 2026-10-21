@@ -13,6 +13,7 @@
 #include <QApplication>
 #include <QDataStream>
 #include <QDialog>
+#include <QDockWidget>
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -416,6 +417,10 @@ private slots:
         limitEnabled->setChecked(true);
         w.findChild<QDoubleSpinBox *>("limitLower")->setValue(-0.1);
         w.findChild<QDoubleSpinBox *>("limitUpper")->setValue(0.1);
+        w.findChild<QCheckBox *>("driveEnabled")->setChecked(true);
+        w.findChild<QDoubleSpinBox *>("driveSpeed")->setValue(.2);
+        w.findChild<QCheckBox *>("damperEnabled")->setChecked(true);
+        w.findChild<QDoubleSpinBox *>("damperCoefficient")->setValue(4753.8923);
         add->click();
         QCOMPARE(w.scene->links.size(),1);
         QCOMPARE(w.scene->links[0].typeKey(),QStringLiteral("prismatic"));
@@ -423,6 +428,8 @@ private slots:
         QCOMPARE(w.scene->links[0].strength,2500.0);QVERIFY(w.scene->links[0].hasLimit);
         QCOMPARE(w.scene->links[0].lower,-.1);QCOMPARE(w.scene->links[0].anchorA,QVector3D(0,-.2f,0));
         QCOMPARE(tree->topLevelItemCount(),1);
+        QVERIFY(w.scene->links[0].driven);QVERIFY(w.scene->links[0].damped);
+        QCOMPARE(w.scene->links[0].driveSpeed,.2);QVERIFY(std::abs(w.scene->links[0].damping-4753.8923)<.001);
         // Undo removes it, redo restores it.
         w.scene->undo.undo();
         QCOMPARE(w.scene->links.size(),0);
@@ -473,16 +480,128 @@ private slots:
         auto *v=w.findChild<Viewport *>();QVERIFY(v);w.scene->select("a");auto *pick=w.findChild<QPushButton *>("anchorPick");pick->click();QVERIFY(v->anchorPicking);auto world=a.anchorMatrix().map({.3f,0,0});QVERIFY(QMetaObject::invokeMethod(v,"clicked",Qt::DirectConnection,Q_ARG(QVector3D,world),Q_ARG(QString,QString("a"))));QCOMPARE(w.scene->find("a")->anchors.size(),1);QVERIFY((w.scene->find("a")->anchors[0]-QVector3D(.3f,0,0)).length()<1e-5f);QVERIFY(!v->anchorPicking);
         w.scene->undo.setClean();QVERIFY(w.close());
     }
+    void assemblyPanelMultiLinkSelection() {
+        MainWindow w;
+        w.setProperty("nonInteractive",true);
+        w.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&w));
+        const auto path =
+            QDir(QCoreApplication::applicationDirPath()).filePath("../examples/hsc-vehicle/ground_1e8.bagua.json");
+        QVERIFY(w.openPath(path));
+        auto *dock = w.findChild<QDockWidget *>("assemblyDock");
+        auto *tree = w.findChild<QTreeWidget *>("linkTree");
+        QVERIFY(dock && tree);
+        dock->show();
+        dock->raise();
+        tree->setMaximumHeight(120);
+        QApplication::processEvents();
+        QCOMPARE(tree->topLevelItemCount(), 19);
+        const auto original = w.scene->links;
+        QSignalSpy resets(tree->model(), &QAbstractItemModel::modelReset);
+        QPersistentModelIndex first(tree->model()->index(0, 0));
+        for (int row : {18, 0, 11, 7, 16, 3, 9, 1, 17, 5, 12, 6, 8, 2, 10, 4, 13, 14, 15, 18}) {
+            auto *item = tree->topLevelItem(row);
+            const auto link = original[row];
+            tree->scrollToItem(item);
+            QApplication::processEvents();
+            const auto rect = tree->visualItemRect(item);
+            QVERIFY(tree->viewport()->rect().contains(rect.center()));
+            QTest::mouseClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier, rect.center());
+            QCOMPARE(resets.count(), 0);
+            QVERIFY(first.isValid());
+            QCOMPARE(tree->currentItem(), item);
+            QCOMPARE(tree->selectedItems().size(), 1);
+            QCOMPARE(tree->selectedItems().first(), item);
+            QCOMPARE(item->data(1, Qt::UserRole + 1).toString(), link.id);
+            QCOMPARE(w.findChild<QComboBox *>("linkType")->currentData().toString(), link.typeKey());
+            QCOMPARE(w.findChild<QComboBox *>("linkBodyA")->currentData().toString(), link.a);
+            QCOMPARE(w.findChild<QComboBox *>("linkBodyB")->currentData().toString(), link.b);
+            QCOMPARE(w.findChild<QCheckBox *>("driveEnabled")->isChecked(), link.driven);
+            QCOMPARE(w.findChild<QCheckBox *>("damperEnabled")->isChecked(), link.damped);
+        }
+        QTest::keyClick(tree, Qt::Key_Up);
+        QCOMPARE(tree->currentItem()->data(1, Qt::UserRole + 1).toString(), original[17].id);
+        QTest::keyClick(tree, Qt::Key_Up);
+        QCOMPARE(tree->currentItem()->data(1, Qt::UserRole + 1).toString(), original[16].id);
+        auto *selected = tree->currentItem();
+        w.scene->notify();
+        QCOMPARE(tree->currentItem(), selected);
+        QCOMPARE(resets.count(), 0);
+        auto *strength = w.findChild<QDoubleSpinBox *>("linkStrength");
+        strength->setValue(2345);
+        w.findChild<QPushButton *>("linkUpdate")->click();
+        QCOMPARE(w.scene->links[16].strength, 2345.);
+        for (int i = 0; i < original.size(); ++i)
+            if (i != 16)
+                QVERIFY(w.scene->links[i] == original[i]);
+        QCOMPARE(tree->currentItem(), selected);
+        w.scene->undo.undo();
+        QCOMPARE(w.scene->links, original);
+        QCOMPARE(tree->currentItem(), selected);
+        QCOMPARE(strength->value(), original[16].strength);
+        w.scene->links.removeAt(0);
+        w.scene->notify();
+        QCOMPARE(tree->currentItem(), selected);
+        QCOMPARE(selected->data(1, Qt::UserRole + 1).toString(), original[16].id);
+        strength->setValue(3456);
+        w.findChild<QPushButton *>("linkUpdate")->click();
+        QCOMPARE(w.scene->links[15].id, original[16].id);
+        QCOMPARE(w.scene->links[15].strength, 3456.);
+        w.scene->undo.setClean();
+        QVERIFY(w.close());
+    }
     void sceneTimeStepForChrono() {
-        if(!Physics::available())QSKIP("Chrono disabled");Scene scene;scene.reset(false);Object o;o.id="a";o.name="a";o.position={0,10,0};o.collisionEnabled=false;scene.objects={o};scene.timeStep=1./120.;Physics physics;QString error;QVERIFY2(physics.start(scene,&error),qPrintable(error));QCOMPARE(physics.stepSize(),scene.timeStep);QVERIFY(physics.step(2,&error));QVERIFY(std::abs(physics.time()-1./60.)<1e-12);
-        scene.exclusions={{"a","missing"}};QVERIFY(!physics.start(scene,&error));
+        if (!Physics::available())
+            QSKIP("Chrono disabled");
+        Scene scene;
+        scene.reset(false);
+        Object o;
+        o.id = "a";
+        o.name = "a";
+        o.position = {0, 10, 0};
+        o.collisionEnabled = false;
+        scene.objects = {o};
+        scene.timeStep = 1. / 120.;
+        Physics physics;
+        QString error;
+        QVERIFY2(physics.start(scene, &error), qPrintable(error));
+        QCOMPARE(physics.stepSize(), scene.timeStep);
+        QVERIFY(physics.step(2, &error));
+        QVERIFY(std::abs(physics.time() - 1. / 60.) < 1e-12);
+        scene.exclusions = {{"a", "missing"}};
+        QVERIFY(!physics.start(scene, &error));
     }
     void nativeScaledAnchorsAndPlaybackFrames() {
 #ifndef BAGUA_TEST_CUDA
         QSKIP("Native CUDA backend disabled");
 #else
-        Scene scene;scene.reset(false);Object a;a.id="a";a.name="a";a.position={0,2,0};a.rotation={13,24,7};a.dimensions={.2f,.4f,.6f};a.scale={2,3,4};a.anchors={{.03f,.05f,.07f}};a.linearVelocity={1,0,0};a.collisionEnabled=false;scene.objects={a};Physics physics;HscOptions options;options.enabled=true;QString error;QVERIFY2(physics.start(scene,&error,options),qPrintable(error));
-        auto *body=physics.preview.find("a");auto original=a.anchorMatrix().map(a.anchors[0]);QVERIFY((body->anchorMatrix().map(a.anchors[0])-original).length()<1e-5f);QVERIFY2(physics.step(4,&error),qPrintable(error));body=physics.preview.find("a");auto moving=body->anchorMatrix().map(a.anchors[0]);QVERIFY(moving.x()>original.x()+.015f);auto actual=body->matrix().map(body->mesh->positions.last());QVERIFY((actual-moving).length()<1e-5f);
+        Scene scene;
+        scene.reset(false);
+        Object a;
+        a.id = "a";
+        a.name = "a";
+        a.position = {0, 2, 0};
+        a.rotation = {13, 24, 7};
+        a.dimensions = {.2f, .4f, .6f};
+        a.scale = {2, 3, 4};
+        a.anchors = {{.03f, .05f, .07f}};
+        a.linearVelocity = {1, 0, 0};
+        a.collisionEnabled = false;
+        scene.objects = {a};
+        Physics physics;
+        HscOptions options;
+        options.enabled = true;
+        QString error;
+        QVERIFY2(physics.start(scene, &error, options), qPrintable(error));
+        auto *body = physics.preview.find("a");
+        auto original = a.anchorMatrix().map(a.anchors[0]);
+        QVERIFY((body->anchorMatrix().map(a.anchors[0]) - original).length() < 1e-5f);
+        QVERIFY2(physics.step(4, &error), qPrintable(error));
+        body = physics.preview.find("a");
+        auto moving = body->anchorMatrix().map(a.anchors[0]);
+        QVERIFY(moving.x() > original.x() + .015f);
+        auto actual = body->matrix().map(body->mesh->positions.last());
+        QVERIFY((actual - moving).length() < 1e-5f);
         Recording recording;recording.begin(physics.preview);QVERIFY(physics.step(1,&error));QVERIFY(recording.append(physics.time(),physics.preview,&error));QTemporaryDir temp(QDir::currentPath()+"/frames-XXXXXX");QVERIFY(recording.save(temp.filePath("frames.brec"),&error));Recording loaded;QVERIFY2(loaded.load(temp.filePath("frames.brec"),&error),qPrintable(error));QVector<Object> frame;QVERIFY(loaded.frame(1,frame,&error));QVERIFY((frame[0].anchorMatrix().map(a.anchors[0])-physics.preview.find("a")->anchorMatrix().map(a.anchors[0])).length()<1e-5f);
 #endif
     }
@@ -496,6 +615,30 @@ private slots:
     void reopeningProjectPreservesExistingTakes() {
         QTemporaryDir temp(QDir::currentPath()+"/project-audit-XXXXXX");Scene source;source.reset(false);source.create(Shape::Box);QString error;QVERIFY(source.save(temp.filePath("scene.bagua.json"),&error));Recording take;take.begin(source);source.objects[0].position.setX(2);QVERIFY(take.append(.1,source,&error));QVERIFY(take.save(temp.filePath("take.brec"),&error));QFile file(temp.filePath("project.bagua.project.json"));QVERIFY(file.open(QIODevice::WriteOnly));file.write(QJsonDocument(QJsonObject{{"format","baguadt.project"},{"version",1},{"scenes",QJsonArray{QJsonObject{{"scene","scene.bagua.json"},{"recordings",QJsonArray{"take.brec"}},{"mode","replay"}}}}}).toJson());file.close();
         MainWindow w;w.show();QVERIFY(QTest::qWaitForWindowExposed(&w));QVERIFY(w.openPath(temp.filePath("scene.bagua.json")));auto *original=w.scene;original->create(Shape::Sphere);const auto authored=original->json();auto *tabs=w.findChild<QTabBar *>("sceneTabs");int count=tabs->count();QVERIFY(w.openProject(file.fileName()));QCOMPARE(tabs->count(),count+1);QCOMPARE(original->json().value("objects"),authored["objects"]);QCOMPARE(original->json().value("links"),authored["links"]);QVERIFY(w.replayActive());QCOMPARE(w.recordedFrames(),2);w.stopReplay();QVERIFY(w.openProject(file.fileName()));QCOMPARE(tabs->count(),count+2);QCOMPARE(original->json().value("objects"),authored["objects"]);QCOMPARE(original->json().value("links"),authored["links"]);original->undo.setClean();QVERIFY(w.close());
+    }
+    void vehicleDriveDamperPersistenceAndValidation() {
+        Scene scene;scene.reset(false);Object a;a.id="a";a.name="a";a.fixed=true;Object b=a;b.id="b";b.name="b";b.fixed=false;scene.objects={a,b};Link link;link.id="motor";link.a="a";link.b="b";link.type=Link::Type::Prismatic;link.driven=true;link.driveSpeed=.2;link.driveRamp=.5;link.driveStrength=1e4;link.damped=true;link.damping=12;scene.links={link};scene.simulation={{"gravity",9.8},{"maxRank",256},{"maxIterations",12000},{"adaptiveInverse",true}};
+        QString error;Scene restored;QVERIFY2(restored.loadJson(scene.json(),&error),qPrintable(error));QCOMPARE(restored.json(),scene.json());QVERIFY(restored.links[0].driven);QVERIFY(restored.links[0].damped);QCOMPARE(restored.links[0].damping,12.);
+        auto original=restored.json();for(auto key:{"speed","ramp","strength"}){auto broken=original;auto links=broken["links"].toArray();auto item=links[0].toObject(),drive=item["drive"].toObject();drive[key]=key==QString("speed")?QJsonValue("bad"):QJsonValue(-1);item["drive"]=drive;links[0]=item;broken["links"]=links;QVERIFY(!restored.loadJson(broken,&error));QCOMPARE(restored.json(),original);}
+        auto broken=original;auto profile=broken["simulation"].toObject();profile["maxRank"]=1.5;broken["simulation"]=profile;QVERIFY(!restored.loadJson(broken,&error));QCOMPARE(restored.json(),original);
+    }
+    void nativeMotorAndDamperControl() {
+#ifndef BAGUA_TEST_CUDA
+        QSKIP("CUDA backend disabled");
+#else
+        Scene source;source.reset(false);Object a;a.id="a";a.name="anchor";a.fixed=true;a.collisionEnabled=false;a.position={0,2,0};a.dimensions={.2f,.2f,.2f};Object b=a;b.id="b";b.name="driven";b.fixed=false;source.objects={a,b};Link link;link.id="motor";link.type=Link::Type::Revolute;link.a="a";link.b="b";link.axis={0,0,1};link.strength=1e5;link.driven=true;link.driveSpeed=2;link.driveRamp=.5;source.links={link};HscOptions options;options.enabled=true;options.nativeAdaptiveInverse=true;Physics physics;QString error;
+        QVERIFY2(physics.start(source,&error,options),qPrintable(error));QVERIFY2(physics.step(24,&error),qPrintable(error));auto stats=physics.linkStats();QCOMPARE(stats.size(),1);QVERIFY(std::abs(stats[0].aim-.02)<1e-10);QVERIFY(std::abs(stats[0].angle-stats[0].aim)<.002);
+        physics.reset();source.links[0].type=Link::Type::Prismatic;source.links[0].driven=false;source.links[0].damped=true;source.links[0].damping=5;source.links[0].axis={0,1,0};source.objects[1].linearVelocity={0,-.5f,0};
+        QVERIFY2(physics.start(source,&error,options),qPrintable(error));QVERIFY2(physics.step(3,&error),qPrintable(error));stats=physics.linkStats();QVERIFY(std::isfinite(stats[0].velocity));QVERIFY(std::abs(stats[0].force+5*stats[0].velocity)<1e-10);QVERIFY(stats[0].force*stats[0].velocity<=0);
+        physics.reset();source.objects[1].linearVelocity={};source.links[0].damped=false;source.links[0].driven=true;source.links[0].driveSpeed=.2;
+        QVERIFY2(physics.start(source,&error,options),qPrintable(error));QVERIFY2(physics.step(24,&error),qPrintable(error));stats=physics.linkStats();QVERIFY(std::abs(stats[0].aim-.002)<1e-10);QVERIFY(std::abs(stats[0].distance-stats[0].aim)<.0002);
+#endif
+    }
+    void importedHscVehicleTopology() {
+        Scene scene;QString error;const auto path=QDir(QCoreApplication::applicationDirPath()).filePath("../examples/hsc-vehicle/ground_1e8.bagua.json");QVERIFY2(scene.load(path,&error),qPrintable(error));QCOMPARE(scene.objects.size(),20);QCOMPARE(scene.links.size(),19);QCOMPARE(scene.exclusions.size(),8);QCOMPARE(scene.simulation["maxIterations"].toInt(),12000);int tets=0,drives=0,dampers=0,pairs=0;
+        for(const auto &o:scene.objects)if(o.deformable){QVERIFY(o.mesh);tets+=int(o.mesh->tetrahedra.size()/4);}for(const auto &l:scene.links){drives+=l.driven;dampers+=l.damped;if(l.id.endsWith("_bead"))pairs+=l.pairs.size();}QCOMPARE(tets,78197);QCOMPARE(drives,4);QCOMPARE(dampers,4);QCOMPARE(pairs,273);
+        QCOMPARE(scene.find("loose_0_tire")->youngModulus,1e8);Scene soft;
+        QVERIFY2(soft.load(QFileInfo(path).dir().filePath("ground_1e6.bagua.json"),&error),qPrintable(error));QCOMPARE(soft.find("loose_0_tire")->youngModulus,1e6);QCOMPARE(soft.find("wheel_0_tire")->youngModulus,1e10);QCOMPARE(soft.links,scene.links);QCOMPARE(soft.exclusions,scene.exclusions);
     }
     void paperRotationDerivativesAndFrames() {
         std::array<double,12> a{},b{};a[3]=a[7]=a[11]=b[3]=b[7]=b[11]=1;

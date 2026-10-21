@@ -3,8 +3,11 @@
 #include <affine_body/abd_linear_subsystem.h>
 #include <collision_detection/simplex_trajectory_filter.h>
 #include <collision_detection/vertex_half_plane_trajectory_filter.h>
+#include <cstdlib>
 #include <cuda_runtime.h>
+#include <filesystem>
 #include <finite_element/fem_linear_subsystem.h>
+#include <fstream>
 #include <linear_system/iterative_solver.h>
 #include <map>
 #include <sim_engine.h>
@@ -86,12 +89,43 @@ private:
             throw SimEngineException("HSC requires ABD/FEM energy DOFs; unsupported subsystem");
         if (n == 0)
             return;
+        checkCuda(cudaDeviceSynchronize()); // SDK assembly may use its own stream.
         auto matrix = info.A();
         int nnz = matrix.triplet_count();
         packed.resize(size_t(nnz));
         if (nnz)
             packHessian<<<(nnz + 255) / 256, 256>>>(matrix, packed.data);
         static_assert(std::is_same_v<Float, double>, "HSC resident solver requires double-precision native buffers");
+        checkCuda(cudaDeviceSynchronize());
+        if (const char *requested = std::getenv("BAGUA_HSC_DUMP_FRAME");
+            requested && std::atoi(requested) == engine().frame()) {
+            const char *directory = std::getenv("BAGUA_HSC_DUMP_DIR");
+            if (directory) {
+                std::filesystem::create_directories(directory);
+                std::vector<Packed> entries(size_t(nnz), Packed{});
+                std::vector<double> rhs(size_t(n), 0.);
+                checkCuda(cudaMemcpy(entries.data(), packed.data, nnz * sizeof(Packed), cudaMemcpyDeviceToHost));
+                checkCuda(
+                    cudaMemcpy(rhs.data(), info.b().buffer_view().data(), n * sizeof(double), cudaMemcpyDeviceToHost));
+                Json header = {{"n", n},
+                               {"fo", fo},
+                               {"nf", nf},
+                               {"qo", qo},
+                               {"nq", nq},
+                               {"blocks", nnz},
+                               {"maxRank", options.maxRank},
+                               {"neumannTerms", options.neumannTerms},
+                               {"maxIterations", options.maxIterations},
+                               {"omega", options.omega},
+                               {"tolerance", options.tolerance},
+                               {"adaptiveInverse", options.adaptiveInverse}};
+                std::ofstream file(std::filesystem::path(directory) / ("matrix-" + std::to_string(calls) + ".bin"),
+                                   std::ios::binary);
+                file << header.dump() << '\n';
+                file.write(reinterpret_cast<const char *>(entries.data()), entries.size() * sizeof(Packed));
+                file.write(reinterpret_cast<const char *>(rhs.data()), rhs.size() * sizeof(double));
+            }
+        }
         bagua::HscStats stats;
         std::string error;
         if (!bagua::solveHscDeviceBlocks(packed.data, nnz, info.b().buffer_view().data(), info.x().buffer_view().data(),

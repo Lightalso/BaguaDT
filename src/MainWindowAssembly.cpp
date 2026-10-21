@@ -12,8 +12,9 @@
 #include <QMenuBar>
 #include <QPushButton>
 #include <QScrollArea>
-#include <QSplitter>
+#include <QScrollBar>
 #include <QSet>
+#include <QSplitter>
 #include <QStatusBar>
 #include <QTabWidget>
 #include <QTableWidget>
@@ -107,7 +108,9 @@ void MainWindow::setupAssemblyDock() {
     linkPickB->setObjectName("linkPickB");
     anchorRow->addWidget(linkPickB);
     anchorRow->addStretch();
-    linkAnchorRow=new QWidget;linkAnchorRow->setLayout(anchorRow);linkLayout->addWidget(linkAnchorRow);
+    linkAnchorRow = new QWidget;
+    linkAnchorRow->setLayout(anchorRow);
+    linkLayout->addWidget(linkAnchorRow);
 
     auto *axisRow = new QHBoxLayout;
     axisRow->setSpacing(4);
@@ -157,7 +160,9 @@ void MainWindow::setupAssemblyDock() {
     limitRow->addWidget(new QLabel(QStringLiteral("限位强度")));
     limitRow->addWidget(limitStrength);
     limitRow->addStretch();
-    linkLimitRow=new QWidget;linkLimitRow->setLayout(limitRow);linkLayout->addWidget(linkLimitRow);
+    linkLimitRow = new QWidget;
+    linkLimitRow->setLayout(limitRow);
+    linkLayout->addWidget(linkLimitRow);
     auto *rotationRow = new QHBoxLayout;
     rotationRow->addWidget(new QLabel(QStringLiteral("目标角（rad）")));
     rotationAngle = vectorField(linkPage, "rotationAngle");
@@ -166,7 +171,9 @@ void MainWindow::setupAssemblyDock() {
     rotationSpeed = vectorField(linkPage, "rotationSpeed");
     rotationRow->addWidget(rotationSpeed);
     rotationRow->addStretch();
-    linkRotationRow=new QWidget;linkRotationRow->setLayout(rotationRow);linkLayout->addWidget(linkRotationRow);
+    linkRotationRow = new QWidget;
+    linkRotationRow->setLayout(rotationRow);
+    linkLayout->addWidget(linkRotationRow);
 
     auto *stitchRow = new QHBoxLayout;
     stitchRow->setSpacing(4);
@@ -192,8 +199,44 @@ void MainWindow::setupAssemblyDock() {
     stitchRow->addWidget(pairsRemove);
     stitchRow->addWidget(pairsAuto);
     stitchRow->addStretch();
-    linkStitchRow=new QWidget;linkStitchRow->setLayout(stitchRow);linkLayout->addWidget(linkStitchRow);
+    linkStitchRow = new QWidget;
+    linkStitchRow->setLayout(stitchRow);
+    linkLayout->addWidget(linkStitchRow);
 
+    driveRow = new QWidget;
+    auto *driveLayout = new QHBoxLayout(driveRow);
+    driveEnabled = new QCheckBox(QStringLiteral("启用驱动"));
+    driveEnabled->setObjectName("driveEnabled");
+    driveSpeed = vectorField(linkPage, "driveSpeed");
+    driveSpeed->setRange(-1e4, 1e4);
+    driveRamp = vectorField(linkPage, "driveRamp");
+    driveRamp->setRange(0, 1000);
+    driveRamp->setValue(.5);
+    driveStrength = vectorField(linkPage, "driveStrength");
+    driveStrength->setRange(.001, 1e12);
+    driveStrength->setValue(1e4);
+    driveLayout->addWidget(driveEnabled);
+    driveLayout->addWidget(new QLabel(QStringLiteral("速度（rad/s 或 m/s）")));
+    driveLayout->addWidget(driveSpeed);
+    driveLayout->addWidget(new QLabel(QStringLiteral("斜坡（s）")));
+    driveLayout->addWidget(driveRamp);
+    driveLayout->addWidget(new QLabel(QStringLiteral("强度")));
+    driveLayout->addWidget(driveStrength);
+    driveLayout->addStretch();
+    linkLayout->addWidget(driveRow);
+    damperRow = new QWidget;
+    auto *damperLayout = new QHBoxLayout(damperRow);
+    damperEnabled = new QCheckBox(QStringLiteral("启用轴向阻尼"));
+    damperEnabled->setObjectName("damperEnabled");
+    damperCoefficient = vectorField(linkPage, "damperCoefficient");
+    damperCoefficient->setRange(0, 1e9);
+    damperLayout->addWidget(damperEnabled);
+    damperLayout->addWidget(new QLabel(QStringLiteral("系数（N·s/m）")));
+    damperLayout->addWidget(damperCoefficient);
+    damperLayout->addStretch();
+    linkLayout->addWidget(damperRow);
+    connect(driveEnabled, &QCheckBox::toggled, this, [this] { syncAssemblyPanel(); });
+    connect(damperEnabled, &QCheckBox::toggled, this, [this] { syncAssemblyPanel(); });
     stitchPairs = new QTableWidget;
     stitchPairs->setObjectName("stitchPairs");
     stitchPairs->setColumnCount(2);
@@ -219,11 +262,21 @@ void MainWindow::setupAssemblyDock() {
     auto *linkScroll = new QScrollArea;
     linkScroll->setWidgetResizable(true);
     linkScroll->setFrameShape(QFrame::NoFrame);
-    linkLayout->removeWidget(linkTree);linkLayout->removeWidget(linkDiagnostics);
+    linkLayout->removeWidget(linkTree);
+    linkLayout->removeWidget(linkDiagnostics);
     linkScroll->setWidget(linkPage);
-    auto *linkTab=new QWidget;auto *linkTabLayout=new QVBoxLayout(linkTab);linkTabLayout->setContentsMargins(4,2,4,2);linkTabLayout->setSpacing(2);
-    auto *splitter=new QSplitter(Qt::Horizontal);splitter->addWidget(linkTree);splitter->addWidget(linkScroll);splitter->setStretchFactor(0,1);splitter->setStretchFactor(1,3);splitter->setSizes({300,900});
-    linkTabLayout->addWidget(splitter,1);linkTabLayout->addWidget(linkDiagnostics);
+    auto *linkTab = new QWidget;
+    auto *linkTabLayout = new QVBoxLayout(linkTab);
+    linkTabLayout->setContentsMargins(4, 2, 4, 2);
+    linkTabLayout->setSpacing(2);
+    auto *splitter = new QSplitter(Qt::Horizontal);
+    splitter->addWidget(linkTree);
+    splitter->addWidget(linkScroll);
+    splitter->setStretchFactor(0, 1);
+    splitter->setStretchFactor(1, 3);
+    splitter->setSizes({300, 900});
+    linkTabLayout->addWidget(splitter, 1);
+    linkTabLayout->addWidget(linkDiagnostics);
     tabs->addTab(linkTab, QStringLiteral("链接"));
 
     // --- anchors -----------------------------------------------------------------------
@@ -359,8 +412,8 @@ void MainWindow::setupAssemblyDock() {
     connect(linkTree, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem *item, QTreeWidgetItem *) {
         if (assemblySyncing || syncing || !item)
             return;
-        const int index = item->data(0, Qt::UserRole).toInt();
-        if (index >= 0 && index < scene->links.size())
+        const int index = selectedLinkIndex();
+        if (index >= 0)
             syncLinkForm(scene->links[index]);
     });
     connect(linkPickA, &QPushButton::clicked, this, [this] {
@@ -487,14 +540,16 @@ void MainWindow::setupAssemblyDock() {
     });
     syncAssemblyPanel();
 }
-// The index is stored on the tree item, never derived from a pointer into the link list:
-// QVector::data() on a shared vector detaches and would invalidate such a pointer.
+// Resolve the stable ID against the authored scene; rows can move after edits.
 int MainWindow::selectedLinkIndex() const {
     auto *item = linkTree ? linkTree->currentItem() : nullptr;
-    if (!item)
+    if (!item || !scene)
         return -1;
-    const int index = item->data(0, Qt::UserRole).toInt();
-    return index >= 0 && index < scene->links.size() ? index : -1;
+    const auto id = item->data(1, Qt::UserRole + 1).toString();
+    for (int i = 0; i < scene->links.size(); ++i)
+        if (scene->links[i].id == id)
+            return i;
+    return -1;
 }
 void MainWindow::deleteSelectedLink() {
     const int index = selectedLinkIndex();
@@ -578,6 +633,13 @@ bool MainWindow::readLinkForm(Link &link, QString *error) const {
     }
     if (link.type != Link::Type::Spherical && link.type != Link::Type::Fixed && link.axis.lengthSquared() < 1e-12f)
         return fail(QStringLiteral("轴不能为零向量"));
+    link.driven =
+        driveEnabled->isChecked() && (link.type == Link::Type::Revolute || link.type == Link::Type::Prismatic);
+    link.driveSpeed = driveSpeed->value();
+    link.driveRamp = driveRamp->value();
+    link.driveStrength = driveStrength->value();
+    link.damped = damperEnabled->isChecked() && link.type == Link::Type::Prismatic;
+    link.damping = damperCoefficient->value();
     link.strength = linkStrength->value();
     if (link.strength <= 0)
         return fail(QStringLiteral("强度必须大于 0"));
@@ -615,6 +677,12 @@ void MainWindow::syncLinkForm(const Link &link) {
         linkAnchorB[size_t(i)]->setValue(link.anchorB[i]);
         linkAxis[size_t(i)]->setValue(link.axis[i]);
     }
+    driveEnabled->setChecked(link.driven);
+    driveSpeed->setValue(link.driveSpeed);
+    driveRamp->setValue(link.driveRamp);
+    driveStrength->setValue(link.driveStrength);
+    damperEnabled->setChecked(link.damped);
+    damperCoefficient->setValue(link.damping);
     rotationAngle->setValue(link.angle);
     rotationSpeed->setValue(link.angularVelocity);
     linkStrength->setValue(link.strength);
@@ -651,24 +719,49 @@ void MainWindow::syncAssemblyPanel() {
             combo->setCurrentIndex(index);
         combo->setEnabled(!editingLocked());
     }
-    // Link list.
+    // Keep items alive during selection callbacks. Clearing the model here
+    // deletes the item while QTreeWidget is still processing its mouse event.
     const QString selectedId =
         linkTree->currentItem() ? linkTree->currentItem()->data(1, Qt::UserRole + 1).toString() : QString{};
     {
         const QSignalBlocker blockTree(linkTree);
-        linkTree->clear();
+        const int scroll = linkTree->verticalScrollBar()->value();
+        QSet<QString> ids;
+        for (const auto &link : model->links)
+            ids.insert(link.id);
+        QHash<QString, QTreeWidgetItem *> items;
+        for (int i = linkTree->topLevelItemCount() - 1; i >= 0; --i) {
+            auto *item = linkTree->topLevelItem(i);
+            const auto id = item->data(1, Qt::UserRole + 1).toString();
+            if (!ids.contains(id))
+                delete linkTree->takeTopLevelItem(i);
+            else
+                items.insert(id, item);
+        }
         for (int i = 0; i < model->links.size(); ++i) {
             const auto &link = model->links[i];
-            auto *item = new QTreeWidgetItem(
-                linkTree, {link.typeKey(), QStringLiteral("%1 → %2").arg(model->find(link.a)?model->find(link.a)->name:link.a,model->find(link.b)?model->find(link.b)->name:link.b), linkSummary(link)});
-            item->setToolTip(0,link.id);
+            auto *item = items.value(link.id, nullptr);
+            if (!item) {
+                item = new QTreeWidgetItem;
+                linkTree->insertTopLevelItem(i, item);
+                items.insert(link.id, item);
+            } else if (linkTree->indexOfTopLevelItem(item) != i) {
+                linkTree->takeTopLevelItem(linkTree->indexOfTopLevelItem(item));
+                linkTree->insertTopLevelItem(i, item);
+            }
+            item->setText(0, link.typeKey());
+            item->setText(1, QStringLiteral("%1 → %2").arg(model->find(link.a) ? model->find(link.a)->name : link.a,
+                                                           model->find(link.b) ? model->find(link.b)->name : link.b));
+            item->setText(2, linkSummary(link));
+            item->setToolTip(0, link.id);
             item->setData(0, Qt::UserRole, i);
             item->setData(1, Qt::UserRole + 1, link.id);
-            if (link.id == selectedId)
-                linkTree->setCurrentItem(item);
         }
+        if (auto *selected = items.value(selectedId, nullptr); selected && linkTree->currentItem() != selected)
+            linkTree->setCurrentItem(selected);
         if (!linkTree->currentItem() && linkTree->topLevelItemCount())
             linkTree->setCurrentItem(linkTree->topLevelItem(0));
+        linkTree->verticalScrollBar()->setValue(scroll);
     }
     // Exclusions.
     exclusionList->clear();
@@ -699,9 +792,21 @@ void MainWindow::syncAssemblyPanel() {
     Link::Type type = Link::Type::Prismatic;
     Link::typeFromKey(linkType->currentData().toString(), type);
     const bool stitch = type == Link::Type::Stitch;
-    linkAnchorRow->setVisible(!stitch);linkLimitRow->setVisible(type==Link::Type::Prismatic || type==Link::Type::Revolute);linkRotationRow->setVisible(type==Link::Type::Rotation);linkStitchRow->setVisible(stitch);stitchPairs->setVisible(stitch);
+    linkAnchorRow->setVisible(!stitch);
+    linkLimitRow->setVisible(type == Link::Type::Prismatic || type == Link::Type::Revolute);
+    linkRotationRow->setVisible(type == Link::Type::Rotation);
+    linkStitchRow->setVisible(stitch);
+    stitchPairs->setVisible(stitch);
     const bool axial = type == Link::Type::Prismatic || type == Link::Type::Revolute || type == Link::Type::Rotation;
     const bool editable = !editingLocked();
+    const bool controllable = type == Link::Type::Revolute || type == Link::Type::Prismatic;
+    driveRow->setVisible(controllable);
+    damperRow->setVisible(type == Link::Type::Prismatic);
+    driveEnabled->setEnabled(editable);
+    damperEnabled->setEnabled(editable);
+    for (auto *field : {driveSpeed, driveRamp, driveStrength})
+        field->setEnabled(editable && controllable && driveEnabled->isChecked());
+    damperCoefficient->setEnabled(editable && type == Link::Type::Prismatic && damperEnabled->isChecked());
     if (!editable) {
         pickTarget = 0;
         viewport->anchorPicking = false;
@@ -799,21 +904,37 @@ void MainWindow::updateLinkDiagnostics() {
         return;
     }
     QStringList parts;
-    const int selected=selectedLinkIndex();const QString selectedId=selected>=0?scene->links[selected].id:QString{};
+    const int selected = selectedLinkIndex();
+    const QString selectedId = selected >= 0 ? scene->links[selected].id : QString{};
     for (const auto &stat : document->physics.linkStats()) {
         QString text = stat.id;
         if (stat.hasDistance)
             text += QStringLiteral(" d=%1").arg(stat.distance, 0, 'f', 4);
         if (stat.hasAngle)
             text += QStringLiteral(" θ=%1").arg(stat.angle, 0, 'f', 4);
+        const auto link =
+            std::find_if(scene->links.cbegin(), scene->links.cend(), [&](const Link &l) { return l.id == stat.id; });
+        if (link != scene->links.cend()) {
+            if (link->driven)
+                text += QStringLiteral(" 目标=%1").arg(stat.aim, 0, 'f', 4);
+            if (link->damped)
+                text += QStringLiteral(" v=%1 m/s  F=%2 N").arg(stat.velocity, 0, 'f', 4).arg(stat.force, 0, 'f', 2);
+        }
         if (!stat.hasDistance && !stat.hasAngle)
             text += QStringLiteral(" 误差=%1").arg(stat.error, 0, 'g', 3);
         const double value = stat.hasDistance ? stat.distance : stat.angle;
         if (stat.hasLimit && (stat.hasDistance || stat.hasAngle) &&
             (value < stat.limitLower || value > stat.limitUpper))
             text += QStringLiteral(" ⚠越界");
-        for(int i=0;i<linkTree->topLevelItemCount();++i){auto *item=linkTree->topLevelItem(i);if(item->data(1,Qt::UserRole+1).toString()==stat.id){item->setText(2,text);item->setToolTip(2,text);}}
-        if(stat.id==selectedId)parts.push_back(text);
+        for (int i = 0; i < linkTree->topLevelItemCount(); ++i) {
+            auto *item = linkTree->topLevelItem(i);
+            if (item->data(1, Qt::UserRole + 1).toString() == stat.id) {
+                item->setText(2, text);
+                item->setToolTip(2, text);
+            }
+        }
+        if (stat.id == selectedId)
+            parts.push_back(text);
     }
     linkDiagnostics->setText(parts.join(QStringLiteral("  ·  ")));
 }

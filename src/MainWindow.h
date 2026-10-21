@@ -52,6 +52,7 @@ public:
     void setPhysicsOptions(HscOptions options);
     HscOptions physicsOptions() const { return solverOptions; }
     bool importAsset(const QString &path, ImportOptions options = {});
+    void importHscVehicle();
     bool openRecording(const QString &path);
     bool saveRecording(const QString &path);
     bool saveRecordingAt(int index, const QString &path);
@@ -134,6 +135,9 @@ private:
     int pickTarget = 0; // 1 = anchor A, 2 = anchor B, 3 = a new anchor on the clicked body
     bool assemblySyncing = false;
     QJsonObject loadedLink;
+    QCheckBox *driveEnabled=nullptr,*damperEnabled=nullptr;
+    QDoubleSpinBox *driveSpeed=nullptr,*driveRamp=nullptr,*driveStrength=nullptr,*damperCoefficient=nullptr;
+    QWidget *driveRow=nullptr,*damperRow=nullptr;
     QWidget *linkAnchorRow=nullptr,*linkLimitRow=nullptr,*linkRotationRow=nullptr,*linkStitchRow=nullptr;
     void setupAssemblyDock();
     void syncAssemblyPanel();

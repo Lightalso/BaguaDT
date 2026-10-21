@@ -322,7 +322,7 @@ struct HscNative::Impl {
             link.distance = entry.value("distance").toDouble();
             link.hasAngle = entry.contains("angle");
             link.angle = entry.value("angle").toDouble();
-            link.error = entry.value("error").toDouble();
+            link.error = entry.value("error").toDouble();link.aim=entry["aim"].toDouble();link.velocity=entry["velocity"].toDouble();link.force=entry["force"].toDouble();
             link.hasLimit = entry.contains("limitLower");
             link.limitLower = entry.value("limitLower").toDouble();
             link.limitUpper = entry.value("limitUpper").toDouble();
@@ -383,6 +383,8 @@ bool HscNative::start(const Scene &source, Scene &preview, const HscOptions &opt
                                                  {"omega", options.omega},
                                                  {"linearTolerance", options.linearTolerance},
                                                  {"adaptiveInverse", options.nativeAdaptiveInverse}}}};
+        auto nativeOptions=root["options"].toObject();for(auto it=source.simulation.begin();it!=source.simulation.end();++it)nativeOptions[it.key()]=it.value();root["options"]=nativeOptions;
+        if(source.simulation["infiniteGround"].toBool()){auto list=root["objects"].toArray();for(int i=0;i<list.size();++i)if(source.objects[i].shape==Shape::Plane){auto entry=list[i].toObject();entry["halfPlane"]=true;entry["height"]=source.objects[i].position.y();list[i]=entry;}root["objects"]=list;}
         auto json = QJsonDocument(root).toJson(QJsonDocument::Compact);
         auto directory = next->workspace.path().toUtf8();
         char message[4096] = {0};
@@ -398,7 +400,7 @@ bool HscNative::start(const Scene &source, Scene &preview, const HscOptions &opt
         preview.selected = source.selected;
         preview.links = source.links;
         preview.exclusions = source.exclusions;
-        preview.timeStep = source.timeStep;
+        preview.timeStep = source.timeStep;preview.simulation=source.simulation;
         if (!next->retrieve(preview, error))
             return false;
         impl = std::move(next);

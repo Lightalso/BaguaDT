@@ -1,0 +1,73 @@
+********* Start testing of EditorTests *********
+Config: Using QtTest library 6.8.3, Qt 6.8.3 (x86_64-little_endian-llp64 shared (dynamic) release build; by MSVC 2022), windows 11
+PASS   : EditorTests::initTestCase()
+SKIP   : EditorTests::nativeHscWorldSmoke() Native CUDA backend disabled
+D:\Collection\BaguaDT\tests\EditorTests.cpp(44) : failure location
+SKIP   : EditorTests::femAbdStitchCarriesLoad() Native CUDA backend disabled
+D:\Collection\BaguaDT\tests\EditorTests.cpp(59) : failure location
+PASS   : EditorTests::primitiveMeshesAreWatertight()
+SKIP   : EditorTests::nativeHscContactCcdAndReplay() Native CUDA backend disabled
+D:\Collection\BaguaDT\tests\EditorTests.cpp(119) : failure location
+SKIP   : EditorTests::nativeHscJoints() Native CUDA backend disabled
+D:\Collection\BaguaDT\tests\EditorTests.cpp(139) : failure location
+PASS   : EditorTests::tetrahedralAssetImport()
+PASS   : EditorTests::linkModelPersistenceAndValidation()
+SKIP   : EditorTests::nativeArticulatedSuspension() Native CUDA backend disabled
+D:\Collection\BaguaDT\tests\EditorTests.cpp(223) : failure location
+SKIP   : EditorTests::nativeContactExclusionAllowsOverlap() Native CUDA backend disabled
+D:\Collection\BaguaDT\tests\EditorTests.cpp(277) : failure location
+PASS   : EditorTests::linkSceneGuiFlow()
+PASS   : EditorTests::linkSceneCloseWhileRunning()
+PASS   : EditorTests::assemblyPanelEditsLinks()
+PASS   : EditorTests::assemblyReferentialIntegrity()
+PASS   : EditorTests::assemblyPanelSelectionAndPicking()
+SKIP   : EditorTests::sceneTimeStepForChrono() Chrono disabled
+D:\Collection\BaguaDT\tests\EditorTests.cpp(483) : failure location
+SKIP   : EditorTests::nativeScaledAnchorsAndPlaybackFrames() Native CUDA backend disabled
+D:\Collection\BaguaDT\tests\EditorTests.cpp(488) : failure location
+SKIP   : EditorTests::nativeSolverFailureReturnsError() Native CUDA backend disabled
+D:\Collection\BaguaDT\tests\EditorTests.cpp(497) : failure location
+PASS   : EditorTests::reopeningProjectPreservesExistingTakes()
+PASS   : EditorTests::vehicleDriveDamperPersistenceAndValidation()
+SKIP   : EditorTests::nativeMotorAndDamperControl() CUDA backend disabled
+D:\Collection\BaguaDT\tests\EditorTests.cpp(514) : failure location
+PASS   : EditorTests::importedHscVehicleTopology()
+PASS   : EditorTests::paperRotationDerivativesAndFrames()
+PASS   : EditorTests::jointsPersistenceAndChronoMapping()
+SKIP   : EditorTests::hscCudaSparseConformance() CUDA disabled
+D:\Collection\BaguaDT\tests\EditorTests.cpp(571) : failure location
+SKIP   : EditorTests::hscLiveRecordingAndProperties() Chrono disabled
+D:\Collection\BaguaDT\tests\EditorTests.cpp(638) : failure location
+PASS   : EditorTests::hscMatchesReproductionReference()
+SKIP   : EditorTests::hscChronoCoupledToggle() Chrono disabled
+D:\Collection\BaguaDT\tests\EditorTests.cpp(749) : failure location
+PASS   : EditorTests::physicsAndReplayControlsAreIndependent()
+SKIP   : EditorTests::importedMeshChronoCollision() Chrono disabled
+D:\Collection\BaguaDT\tests\EditorTests.cpp(838) : failure location
+PASS   : EditorTests::meshImportAndPortableScene()
+PASS   : EditorTests::recordingRoundTripAndDeformation()
+PASS   : EditorTests::hscRealSnapshotsReplay()
+PASS   : EditorTests::recordingListKeepsEachTake()
+PASS   : EditorTests::recordingUiAndPortableProject()
+PASS   : EditorTests::simulateAndRecordFixedStep()
+PASS   : EditorTests::replayTransportAndTabPause()
+SKIP   : EditorTests::chronoUprightCylinderStability() Chrono disabled
+D:\Collection\BaguaDT\tests\EditorTests.cpp(1230) : failure location
+PASS   : EditorTests::physicalPropertiesPersistence()
+SKIP   : EditorTests::chronoFreeFallAndContacts() Chrono disabled
+D:\Collection\BaguaDT\tests\EditorTests.cpp(1322) : failure location
+SKIP   : EditorTests::simulationControlsAndTabs() Chrono disabled
+D:\Collection\BaguaDT\tests\EditorTests.cpp(1386) : failure location
+SKIP   : EditorTests::chronoScaledRotatedCollider() Chrono disabled
+D:\Collection\BaguaDT\tests\EditorTests.cpp(1446) : failure location
+PASS   : EditorTests::sceneUndoAndPersistence()
+PASS   : EditorTests::malformedLoadIsTransactional()
+PASS   : EditorTests::geometryPicking()
+PASS   : EditorTests::backendIntegration()
+PASS   : EditorTests::editorInteraction()
+PASS   : EditorTests::sceneTabsKeepIndependentDocuments()
+PASS   : EditorTests::sceneTabClosingAndExitProtection()
+PASS   : EditorTests::rightMouseFlyCamera()
+PASS   : EditorTests::cleanupTestCase()
+Totals: 33 passed, 0 failed, 18 skipped, 0 blacklisted, 28372ms
+********* Finished testing of EditorTests *********

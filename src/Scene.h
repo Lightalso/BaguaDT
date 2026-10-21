@@ -64,7 +64,9 @@ struct Link {
     double angle = 0, angularVelocity = 0; // legacy "rotation" drive, radians
     QVector<QPair<int, int>> pairs;        // stitch: (anchor ordinal on a, anchor/vertex on b)
     bool anchorPairs = false;              // stitch: pair[1] is an anchor ordinal on b, else a vertex
-    double stiffness = 20000, rest = 0;    // stitch
+    bool driven = false, damped = false;
+    double driveSpeed = 0, driveRamp = .5, driveStrength = 1e4, damping = 0;
+    double stiffness = 20000, rest = 0; // stitch
     bool kinematic() const { return type != Type::Stitch; }
     bool operator==(const Link &other) const;
     bool operator!=(const Link &other) const { return !(*this == other); }
@@ -76,7 +78,7 @@ QJsonObject linkJson(const Link &link);
 // Per-link runtime diagnostics reported by the backends each step.
 struct LinkStat {
     QString id, type;
-    double distance = 0, angle = 0, error = 0;
+    double distance = 0, angle = 0, error = 0, aim = 0, velocity = 0, force = 0;
     bool hasDistance = false, hasAngle = false;
     double limitLower = 0, limitUpper = 0;
     bool hasLimit = false;
@@ -92,7 +94,7 @@ public:
     double timeStep = 1.0 / 240.0;
     QString selected;
     QUndoStack undo;
-    QJsonObject view;
+    QJsonObject view, simulation;
     Object *current();
     const Object *current() const;
     Object *find(const QString &id);

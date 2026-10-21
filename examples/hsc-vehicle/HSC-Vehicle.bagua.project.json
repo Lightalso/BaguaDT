@@ -1,0 +1,19 @@
+{
+  "format": "baguadt.project",
+  "version": 1,
+  "name": "HSC 整车 · 可重新求解",
+  "scenes": [
+    {
+      "name": "软障碍胎 E=1e6 · 初始装配",
+      "scene": "ground_1e6.bagua.json",
+      "mode": "edit"
+    },
+    {
+      "name": "障碍胎 E=1e8 · 初始装配 / 部分试跑",
+      "scene": "ground_1e8.bagua.json",
+      "recordings": ["validation/ground_1e8.partial.brec"],
+      "recording": "validation/ground_1e8.partial.brec",
+      "mode": "edit"
+    }
+  ]
+}

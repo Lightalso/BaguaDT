@@ -1,9 +1,13 @@
+// Keep CCCL template kernels private to this solver; the SDK embeds its own copy.
+#define THRUST_CUB_WRAPPED_NAMESPACE bagua_hsc_cccl
 #include "HscCuda.h"
 #include "HscCudaDevice.h"
 #include <algorithm>
 #include <chrono>
 #include <climits>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cuda_runtime.h>
 #include <limits>
 #include <map>
@@ -20,6 +24,7 @@
 #include <thrust/transform.h>
 #include <thrust/transform_reduce.h>
 namespace bagua {
+namespace thrust = ::bagua_hsc_cccl::thrust;
 namespace {
 using DV = thrust::device_vector<double>;
 using DI = thrust::device_vector<int>;
@@ -59,9 +64,24 @@ __global__ void multiply(int n, const int *rows, const int *columns, const doubl
         y[i] = sum;
     }
 }
+__global__ void multiplyWarp(int n, const int *rows, const int *columns, const double *values, const double *x,
+                             double *y) {
+    int lane = threadIdx.x & 31, row = (blockIdx.x * blockDim.x + threadIdx.x) / 32;
+    if (row >= n)
+        return;
+    double sum = 0;
+    for (int j = rows[row] + lane; j < rows[row + 1]; j += 32)
+        sum += values[j] * x[columns[j]];
+    for (int offset = 16; offset; offset /= 2)
+        sum += __shfl_down_sync(0xffffffff, sum, offset);
+    if (lane == 0)
+        y[row] = sum;
+}
 void product(const Csr &a, const DV &x, DV &y) {
     y.resize(size_t(a.n));
-    if (a.n)
+    if (a.n >= 1024)
+        multiplyWarp<<<grid(size_t(a.n) * 32), 256>>>(a.n, ptr(a.rows), ptr(a.columns), ptr(a.values), ptr(x), ptr(y));
+    else if (a.n)
         multiply<<<grid(a.n), 256>>>(a.n, ptr(a.rows), ptr(a.columns), ptr(a.values), ptr(x), ptr(y));
 }
 __global__ void combine(int n, double *y, const double *x, double a, double b) {
@@ -129,11 +149,34 @@ __global__ void applyBlocks(int nb, const int *offsets, const int *sizes, const 
         y[start + row] = omega * sum;
     }
 }
+// FEM blocks are uniformly 3x3. Pack adjacent vertices into a launch instead of
+// assigning a mostly idle warp to each vertex.
+__global__ void applyTriples(int n, const double *inverse, const double *x, double *y, double omega) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n)
+        return;
+    int base = i / 3 * 3, off = i / 3 * 9 + (i % 3) * 3;
+    y[i] = omega * (inverse[off] * x[base] + inverse[off + 1] * x[base + 1] + inverse[off + 2] * x[base + 2]);
+}
+__global__ void accumulateTriples(int n, const double *inverse, const double *work, double *term, double *y,
+                                  double omega) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n)
+        return;
+    int base = i / 3 * 3, off = i / 3 * 9 + (i % 3) * 3;
+    double next = term[i] - omega * (inverse[off] * work[base] + inverse[off + 1] * work[base + 1] +
+                                     inverse[off + 2] * work[base + 2]);
+    term[i] = next;
+    y[i] += next;
+}
 struct BlockInverse {
     int count;
+    bool triples;
     DI offsets, sizes, invOffsets;
     DV inverse;
-    BlockInverse(const Csr &a, const std::vector<int> &blocks) : count(int(blocks.size())), sizes(blocks) {
+    BlockInverse(const Csr &a, const std::vector<int> &blocks)
+        : count(int(blocks.size())), triples(std::all_of(blocks.begin(), blocks.end(), [](int n) { return n == 3; })),
+          sizes(blocks) {
         std::vector<int> off, ioff;
         int start = 0, packed = 0;
         for (int n : blocks) {
@@ -155,21 +198,36 @@ struct BlockInverse {
     }
     void apply(const DV &x, DV &y, double omega) const {
         y.resize(x.size());
-        if (count)
+        if (count && triples)
+            applyTriples<<<grid(x.size()), 256>>>(int(x.size()), ptr(inverse), ptr(x), ptr(y), omega);
+        else if (count)
             applyBlocks<<<count, 32>>>(count, ptr(offsets), ptr(sizes), ptr(invOffsets), ptr(inverse), ptr(x), ptr(y),
                                        omega);
     }
 };
-void polynomial(const Csr &a, const BlockInverse &b, const HscOptions &o, const DV &x, DV &y) {
+struct PolynomialWorkspace {
     DV term, work, scaled;
+};
+void polynomial(const Csr &a, const BlockInverse &b, const HscOptions &o, const DV &x, DV &y,
+                PolynomialWorkspace &workspace) {
+    auto &term = workspace.term, &work = workspace.work, &scaled = workspace.scaled;
     b.apply(x, term, o.omega);
     y = term;
     for (int k = 1; k < o.neumannTerms; ++k) {
         product(a, term, work);
-        b.apply(work, scaled, o.omega);
-        axpby(term, scaled, -1, 1);
-        axpby(y, term, 1, 1);
+        if (b.count && b.triples)
+            accumulateTriples<<<grid(term.size()), 256>>>(int(term.size()), ptr(b.inverse), ptr(work), ptr(term),
+                                                          ptr(y), o.omega);
+        else {
+            b.apply(work, scaled, o.omega);
+            axpby(term, scaled, -1, 1);
+            axpby(y, term, 1, 1);
+        }
     }
+}
+void polynomial(const Csr &a, const BlockInverse &b, const HscOptions &o, const DV &x, DV &y) {
+    PolynomialWorkspace workspace;
+    polynomial(a, b, o, x, y, workspace);
 }
 struct Pivot {
     double value;
@@ -381,6 +439,27 @@ __global__ void symmetric(int n, const double *a, double *b) {
     if (q < n * n)
         b[q] = (a[q] + a[size_t(q % n) * n + q / n]) * .5;
 }
+__global__ void seedDenseInverse(int n, const int *offsets, const int *sizes, const int *invOffsets,
+                                 const double *inverse, double *out, double omega) {
+    int block = blockIdx.x, q = threadIdx.x, s = sizes[block];
+    if (q < s * s)
+        out[size_t(offsets[block] + q / s) * n + offsets[block] + q % s] = omega * inverse[invOffsets[block] + q];
+}
+__global__ void accumulateDenseInverse(int n, const int *offsets, const int *sizes, const int *invOffsets,
+                                       const double *inverse, const double *work, double *term, double *sum,
+                                       double omega) {
+    int block = blockIdx.y, row = threadIdx.y, col = blockIdx.x * 16 + threadIdx.x;
+    if (row >= sizes[block] || col >= n)
+        return;
+    int start = offsets[block], s = sizes[block], off = invOffsets[block] + row * s;
+    double value = 0;
+    for (int k = 0; k < s; ++k)
+        value += inverse[off + k] * work[size_t(start + k) * n + col];
+    size_t index = size_t(start + row) * n + col;
+    double next = term[index] - omega * value;
+    term[index] = next;
+    sum[index] += next;
+}
 struct AffineInverse {
     const Csr &a;
     const BlockInverse &blocks;
@@ -396,15 +475,20 @@ struct AffineInverse {
             stats.inverseFallbacks = 1;
             return;
         }
-        dense.resize(count);
-        DV x(size_t(a.n)), y, ap(count), update(count), sym(count);
-        for (int j = 0; j < a.n; ++j) {
-            thrust::fill(x.begin(), x.end(), 0.);
-            unit<<<1, 1>>>(j, ptr(x));
-            polynomial(a, blocks, o, x, y);
-            putColumn<<<grid(a.n), 256>>>(a.n, j, ptr(y), ptr(dense));
-        }
+        dense.assign(count, 0.);
+        DV ap(count), update(count), sym(count);
+        seedDenseInverse<<<blocks.count, 256>>>(a.n, ptr(blocks.offsets), ptr(blocks.sizes), ptr(blocks.invOffsets),
+                                                ptr(blocks.inverse), ptr(dense), o.omega);
         dim3 dim((a.n + 15) / 16, (a.n + 15) / 16);
+        // The same block-Neumann polynomial applied to every basis column in a
+        // batch; avoids thousands of tiny launches for the small ABD subspace.
+        DV term = dense;
+        for (int k = 1; k < o.neumannTerms; ++k) {
+            csrDense<<<dim, dim3(16, 16)>>>(a.n, ptr(a.rows), ptr(a.columns), ptr(a.values), ptr(term), ptr(ap));
+            accumulateDenseInverse<<<dim3((a.n + 15) / 16, blocks.count), dim3(16, 12)>>>(
+                a.n, ptr(blocks.offsets), ptr(blocks.sizes), ptr(blocks.invOffsets), ptr(blocks.inverse), ptr(ap),
+                ptr(term), ptr(dense), o.omega);
+        }
         for (;;) {
             csrDense<<<dim, dim3(16, 16)>>>(a.n, ptr(a.rows), ptr(a.columns), ptr(a.values), ptr(dense), ptr(ap));
             identityMinus<<<grid(count), 256>>>(a.n, ptr(ap));
@@ -450,11 +534,24 @@ void append(HostCsr &a, int row, int col, double value) {
 void finish(HostCsr &a) { std::partial_sum(a.rows.begin(), a.rows.end(), a.rows.begin()); }
 DV solveCore(const Csr &originalGpu, const Csr &dg, const Csr &ag, DK eKeys, DV eValues, int nf, int nq,
              const std::vector<int> &rigidBlocks, const DV &rightHandSide, const HscOptions &o, HscStats &next) {
+    auto phaseStart = std::chrono::steady_clock::now();
+    const bool timings = std::getenv("BAGUA_HSC_TIMINGS") != nullptr;
+    auto mark = [&](const char *phase) {
+        if (timings) {
+            check(cudaDeviceSynchronize());
+            auto now = std::chrono::steady_clock::now();
+            std::fprintf(stderr, "HSC %s %.3f ms\n", phase,
+                         std::chrono::duration<double, std::milli>(now - phaseStart).count());
+            phaseStart = now;
+        }
+    };
     int n = nf + nq;
     BlockInverse di(dg, std::vector<int>(size_t(nf / 3), 3)), ai(ag, rigidBlocks);
     AffineInverse pa(ag, ai, o, next);
+    mark("inverse");
     Factors u, v;
     aca(nq, nf, std::move(eKeys), std::move(eValues), o, u, v, next);
+    mark("ACA");
     int rank = next.rank;
     DV c(size_t(rank) * rank), tempq, coeff, tempcoeff, tempf, uc;
     for (int j = 0; j < rank; ++j) {
@@ -477,6 +574,7 @@ DV solveCore(const Csr &originalGpu, const Csr &dg, const Csr &ag, DK eKeys, DV 
         denseProduct<<<grid(rank), 256>>>(rank, rank, ptr(c), ptr(coeff), ptr(tempcoeff));
         addFactor(v, tempcoeff, y, -1);
     };
+    mark("Schur coefficients");
     DV b = rightHandSide;
     DV x(size_t(n), 0.), r = b, applied, df, dq, rf(size_t(nf), 0.), rq(size_t(nq), 0.), direction(size_t(n), 0.);
     double normb = norm(b);
@@ -495,7 +593,8 @@ DV solveCore(const Csr &originalGpu, const Csr &dg, const Csr &ag, DK eKeys, DV 
         DV cr = right, z, p, ap;
         double rightNorm = norm(right);
         if (rightNorm) {
-            polynomial(dg, di, o, cr, z);
+            PolynomialWorkspace femWorkspace;
+            polynomial(dg, di, o, cr, z, femWorkspace);
             p = z;
             double rz = dot(cr, z);
             bool converged = false;
@@ -505,17 +604,25 @@ DV solveCore(const Csr &originalGpu, const Csr &dg, const Csr &ag, DK eKeys, DV 
                 require(denominator > 0 && rz > 0 && std::isfinite(denominator) && std::isfinite(rz),
                         "GPU Schur PCG encountered a non-SPD operator");
                 axpby(df, p, rz / denominator, 1);
-                schur(df, ap);
-                cr = right;
-                axpby(cr, ap, -1, 1);
+                axpby(cr, ap, -rz / denominator, 1);
                 ++next.iterations;
-                if (norm(cr) / rightNorm <= (o.residualCorrection ? std::min(1e-5, o.tolerance * .1) : o.tolerance)) {
-                    converged = true;
-                    break;
+                const double target = o.residualCorrection ? std::min(1e-5, o.tolerance * .1) : o.tolerance;
+                bool candidate = norm(cr) / rightNorm <= target, restart = false;
+                // Use PCG's residual recurrence between reliable updates. Always
+                // confirm convergence against the actual Schur operator.
+                if (candidate || (iter + 1) % 256 == 0) {
+                    schur(df, ap);
+                    cr = right;
+                    axpby(cr, ap, -1, 1);
+                    if (norm(cr) / rightNorm <= target) {
+                        converged = true;
+                        break;
+                    }
+                    restart = candidate;
                 }
-                polynomial(dg, di, o, cr, z);
+                polynomial(dg, di, o, cr, z, femWorkspace);
                 double rzNew = dot(cr, z);
-                axpby(p, z, 1, rzNew / rz);
+                axpby(p, z, 1, restart ? 0 : rzNew / rz);
                 rz = rzNew;
             }
             require(converged, "GPU Schur PCG iteration limit reached");
@@ -548,6 +655,7 @@ DV solveCore(const Csr &originalGpu, const Csr &dg, const Csr &ag, DK eKeys, DV 
     require(normb == 0 || dot(b, x) > 0, "GPU HSC Newton direction is not descent");
     check(cudaGetLastError());
     check(cudaDeviceSynchronize());
+    mark("PCG and recovery");
     return x;
 }
 } // namespace

@@ -73,11 +73,14 @@ if ($testExit -ne 0) { throw "Editor tests failed with exit code $testExit" }
 if ($Package) {
     New-Item -ItemType Directory -Force dist\BaguaDT | Out-Null
     Copy-Item "$BuildDirectory\BaguaDT.exe" dist\BaguaDT
+    Copy-Item "$BuildDirectory\BaguaVehicleRunner.exe" dist\BaguaDT
+    New-Item -ItemType Directory -Force dist/BaguaDT/tools | Out-Null
+    Copy-Item scripts/ImportHSCVehicle.py dist/BaguaDT/tools
     Get-ChildItem $BuildDirectory -Filter '*.dll' | Copy-Item -Destination dist\BaguaDT
     Invoke-Checked "$QtRoot\bin\windeployqt.exe" @('--release','--no-translations','--no-system-d3d-compiler','dist\BaguaDT\BaguaDT.exe')
     Copy-Item examples dist\BaguaDT -Recurse -Force
     Copy-Item README.md,LICENSE,THIRD_PARTY_NOTICES.md dist\BaguaDT
-    Copy-Item scripts\OpenHSC.cmd,scripts\OpenHSCCoupled.cmd,scripts\OpenHSCNative.cmd,scripts\OpenAssembly.cmd dist\BaguaDT
+    Copy-Item scripts\OpenHSC.cmd,scripts\OpenHSCCoupled.cmd,scripts\OpenHSCNative.cmd,scripts\OpenAssembly.cmd,scripts\OpenHSCVehicle.cmd dist\BaguaDT
     Copy-Item docs dist\BaguaDT -Recurse -Force
     New-Item -ItemType Directory -Force dist\BaguaDT\licenses | Out-Null
     Copy-Item licenses\* dist\BaguaDT\licenses -Recurse -Force

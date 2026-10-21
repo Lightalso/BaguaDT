@@ -1,0 +1,1 @@
+PASS rank=84 iterations=1301 residual=9.59355652058e-07 milliseconds=76883.591 
