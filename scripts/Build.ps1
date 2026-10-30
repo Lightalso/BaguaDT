@@ -71,6 +71,17 @@ $testExit = $LASTEXITCODE
 if (Test-Path "$BuildDirectory\test-results.txt") { Get-Content "$BuildDirectory\test-results.txt" }
 if ($testExit -ne 0) { throw "Editor tests failed with exit code $testExit" }
 if ($Package) {
+    # Never publish runtime scratch folders left by an older binary or test run.
+    $scratchPatterns = @('hsc-runtime-*','hsc-probe-*','project-*','component-*','vehicle-components-*',
+        'native-recording-*','frames-*','tet-import-*','mesh-physics-*','asset-tests-*','recording-tests-*',
+        'takes-*','fixed-step-*','replay-ui-*','physics-tests-*','scene-tests-*','tabs-tests-*',
+        'closing-tests-*','control-separation-*','cache')
+    if (Test-Path dist\BaguaDT) {
+        Get-ChildItem dist\BaguaDT -Directory | Where-Object {
+            $name = $_.Name
+            ($scratchPatterns | Where-Object { $name -like $_ }).Count -gt 0
+        } | Remove-Item -Recurse -Force
+    }
     New-Item -ItemType Directory -Force dist\BaguaDT | Out-Null
     Copy-Item "$BuildDirectory\BaguaDT.exe" dist\BaguaDT
     Copy-Item "$BuildDirectory\BaguaVehicleRunner.exe" dist\BaguaDT

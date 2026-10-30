@@ -24,7 +24,7 @@
 
 | 组成 | 位置 |
 | --- | --- |
-| 场景桥（Qt → JSON → 原生世界） | `src/HscNative.cpp` |
+| 场景桥（Qt → JSON → 原生世界） | `src/simulation/HscNative.cpp` |
 | 原生世界（ABD / FEM / 接触 / 关节 / 快照） | `native/HscNativeWorld.cpp` |
 | CUDA HSC 线性求解器 | `native/LinearHsc.cu`，补丁把它安装为 libuipc 的 `linear_system/linear_hsc.cu` |
 | 覆盖层（补丁） | `native/overlays/`：`log_neo_hookean`、`paper_rotation` 约束 |
@@ -72,7 +72,7 @@ IPC 势垒在距离小于 `d_hat` 时提供能量，高速情形由轨迹过滤�
 
 ## Chrono HSC 适配（保留的历史实现）
 
-在原生后端之前，本项目曾把 HSC 实现为 `chrono::ChSolver` 的子类 `ChronoHsc`，在 Chrono 的 SMC/FEM 系统里替换线性求解器。该实现仍保留在代码与测试中（`hscMatchesReproductionReference`、`hscChronoCoupledToggle`），用于和 CPU 参考求解器 `src/Hsc.cpp` 对照，但编辑器的开关不再选择它：`HscOptions::nativePipeline` 为真时直接使用原生后端。
+在原生后端之前，本项目曾把 HSC 实现为 `chrono::ChSolver` 的子类 `ChronoHsc`，在 Chrono 的 SMC/FEM 系统里替换线性求解器。该实现仍保留在代码与测试中（`hscMatchesReproductionReference`、`hscChronoCoupledToggle`），用于和 CPU 参考求解器 `src/simulation/Hsc.cpp` 对照，但编辑器的开关不再选择它：`HscOptions::nativePipeline` 为真时直接使用原生后端。
 
 保留这段历史的原因与教训：
 

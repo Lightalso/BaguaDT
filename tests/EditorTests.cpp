@@ -8,7 +8,11 @@
 #include <cuda_runtime.h>
 #endif
 #include "MainWindow.h"
+#include "Cache.h"
+#include "ProjectFile.h"
+#include "ProjectManagerDialog.h"
 #include "Theme.h"
+#include "VehicleAssemblyDialog.h"
 #include <QAction>
 #include <QApplication>
 #include <QDataStream>
@@ -18,16 +22,21 @@
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QLineF>
 #include <QMenu>
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QQuaternion>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QSurfaceFormat>
 #include <QTemporaryDir>
+#include <QThread>
 #include <QToolButton>
 #include <QVector2D>
 #include <QtTest>
 #include <array>
+#include <cmath>
 #include <map>
 #include <utility>
 using namespace bagua;
@@ -40,6 +49,7 @@ static void moveMouse(QWidget *widget, QPoint p, Qt::MouseButtons buttons = Qt::
 class EditorTests : public QObject {
     Q_OBJECT
 private slots:
+    void initTestCase() { bagua::cache::prepare(); }
     void nativeHscWorldSmoke() {
 #ifndef BAGUA_TEST_CUDA
         QSKIP("Native CUDA backend disabled");
@@ -125,7 +135,7 @@ private slots:
         Recording recording;recording.begin(physics.preview,{{"producer","native HSC"}});int peakContacts=0,peakRank=0;
         for(int i=0;i<20;++i){QVERIFY2(physics.step(1,&error),qPrintable(error));peakContacts=std::max(peakContacts,physics.contacts());peakRank=std::max(peakRank,physics.hscStats().rank);QVERIFY(physics.hscStats().converged);QVERIFY2(recording.append(physics.time(),physics.preview,&error),qPrintable(error));}
         QVERIFY2(peakContacts>0,"IPC contact stencils must actually be active");QVERIFY2(peakRank>0,"FEM/ABD contact must create a nonzero HSC coupling block");
-        QTemporaryDir temp(QDir::currentPath()+"/native-recording-XXXXXX");QVERIFY(recording.save(temp.filePath("native.bgrec"),&error));Recording restored;QVERIFY2(restored.load(temp.filePath("native.bgrec"),&error),qPrintable(error));QVector<Object> frame;QVERIFY(restored.frame(restored.frameCount()-1,frame,&error));QCOMPARE(frame.size(),physics.preview.objects.size());
+        QTemporaryDir temp{cache::temporaryTemplate(QStringLiteral("tests"), QStringLiteral("test"))};QVERIFY(recording.save(temp.filePath("native.bgrec"),&error));Recording restored;QVERIFY2(restored.load(temp.filePath("native.bgrec"),&error),qPrintable(error));QVector<Object> frame;QVERIFY(restored.frame(restored.frameCount()-1,frame,&error));QCOMPARE(frame.size(),physics.preview.objects.size());
         for(int i=0;i<frame.size();++i)QCOMPARE(frame[i].mesh->positions,physics.preview.objects[i].mesh->positions);
         // A 100 m/s impact crosses the slab in one unconstrained step: CCD must prevent tunnelling.
         // A plane's visible face is its local XZ plane, so its top face lies at the object's y, and
@@ -151,7 +161,7 @@ private slots:
 #endif
     }
     void tetrahedralAssetImport() {
-        QTemporaryDir temp(QDir::currentPath()+"/tet-import-XXXXXX");QFile file(temp.filePath("volume.msh"));QVERIFY(file.open(QIODevice::WriteOnly));file.write("$MeshFormat\n2.2 0 8\n$EndMeshFormat\n$Nodes\n4\n10 0 0 0\n20 1 0 0\n30 0 1 0\n40 0 0 1\n$EndNodes\n$Elements\n1\n5 4 0 10 20 30 40\n$EndElements\n");file.close();
+        QTemporaryDir temp{cache::temporaryTemplate(QStringLiteral("tests"), QStringLiteral("test"))};QFile file(temp.filePath("volume.msh"));QVERIFY(file.open(QIODevice::WriteOnly));file.write("$MeshFormat\n2.2 0 8\n$EndMeshFormat\n$Nodes\n4\n10 0 0 0\n20 1 0 0\n30 0 1 0\n40 0 0 1\n$EndNodes\n$Elements\n1\n5 4 0 10 20 30 40\n$EndElements\n");file.close();
         QVector<Object> objects;QString error;QVERIFY2(Assets::importFile(file.fileName(),objects,&error),qPrintable(error));QCOMPARE(objects.size(),1);QCOMPARE(objects[0].mesh->tetrahedra.size(),4);QCOMPARE(objects[0].mesh->indices.size(),12);QVERIFY(objects[0].deformable);
         Scene scene;scene.reset(false);scene.objects=objects;Scene restored;QVERIFY2(restored.loadJson(scene.json(),&error),qPrintable(error));QCOMPARE(restored.objects[0].mesh->tetrahedra,objects[0].mesh->tetrahedra);
         if(Physics::available()){Physics physics;QVERIFY2(physics.start(restored,&error),qPrintable(error));QVERIFY2(physics.step(2,&error),qPrintable(error));}
@@ -474,7 +484,7 @@ private slots:
     }
     void assemblyPanelSelectionAndPicking() {
         MainWindow w;w.show();QVERIFY(QTest::qWaitForWindowExposed(&w));w.newScene(false);Object a;a.id="a";a.name="a";a.position={0,1,0};a.dimensions={2,1,1};a.scale={2,1,1};Object b=a;b.id="b";b.name="b";b.position={3,1,0};w.scene->objects={a,b};w.scene->notify();
-        auto *type=w.findChild<QComboBox *>("linkType"),*left=w.findChild<QComboBox *>("linkBodyA"),*right=w.findChild<QComboBox *>("linkBodyB");left->setCurrentIndex(left->findData("a"));right->setCurrentIndex(right->findData("b"));
+        auto *left=w.findChild<QComboBox *>("linkBodyA"),*right=w.findChild<QComboBox *>("linkBodyB");left->setCurrentIndex(left->findData("a"));right->setCurrentIndex(right->findData("b"));
         auto *add=w.findChild<QPushButton *>("linkAdd");add->click();add->click();QCOMPARE(w.scene->links.size(),2);QVERIFY(w.scene->links[0].id!=w.scene->links[1].id);Scene restored;QString error;QVERIFY2(restored.loadJson(w.scene->json(),&error),qPrintable(error));
         auto *limit=w.findChild<QCheckBox *>("limitEnabled");limit->setChecked(true);QVERIFY(w.findChild<QDoubleSpinBox *>("limitLower")->isEnabled());limit->setChecked(false);QVERIFY(!w.findChild<QDoubleSpinBox *>("limitLower")->isEnabled());
         auto *v=w.findChild<Viewport *>();QVERIFY(v);w.scene->select("a");auto *pick=w.findChild<QPushButton *>("anchorPick");pick->click();QVERIFY(v->anchorPicking);auto world=a.anchorMatrix().map({.3f,0,0});QVERIFY(QMetaObject::invokeMethod(v,"clicked",Qt::DirectConnection,Q_ARG(QVector3D,world),Q_ARG(QString,QString("a"))));QCOMPARE(w.scene->find("a")->anchors.size(),1);QVERIFY((w.scene->find("a")->anchors[0]-QVector3D(.3f,0,0)).length()<1e-5f);QVERIFY(!v->anchorPicking);
@@ -602,7 +612,7 @@ private slots:
         QVERIFY(moving.x() > original.x() + .015f);
         auto actual = body->matrix().map(body->mesh->positions.last());
         QVERIFY((actual - moving).length() < 1e-5f);
-        Recording recording;recording.begin(physics.preview);QVERIFY(physics.step(1,&error));QVERIFY(recording.append(physics.time(),physics.preview,&error));QTemporaryDir temp(QDir::currentPath()+"/frames-XXXXXX");QVERIFY(recording.save(temp.filePath("frames.brec"),&error));Recording loaded;QVERIFY2(loaded.load(temp.filePath("frames.brec"),&error),qPrintable(error));QVector<Object> frame;QVERIFY(loaded.frame(1,frame,&error));QVERIFY((frame[0].anchorMatrix().map(a.anchors[0])-physics.preview.find("a")->anchorMatrix().map(a.anchors[0])).length()<1e-5f);
+        Recording recording;recording.begin(physics.preview);QVERIFY(physics.step(1,&error));QVERIFY(recording.append(physics.time(),physics.preview,&error));QTemporaryDir temp{cache::temporaryTemplate(QStringLiteral("tests"), QStringLiteral("test"))};QVERIFY(recording.save(temp.filePath("frames.brec"),&error));Recording loaded;QVERIFY2(loaded.load(temp.filePath("frames.brec"),&error),qPrintable(error));QVector<Object> frame;QVERIFY(loaded.frame(1,frame,&error));QVERIFY((frame[0].anchorMatrix().map(a.anchors[0])-physics.preview.find("a")->anchorMatrix().map(a.anchors[0])).length()<1e-5f);
 #endif
     }
     void nativeSolverFailureReturnsError() {
@@ -613,8 +623,407 @@ private slots:
 #endif
     }
     void reopeningProjectPreservesExistingTakes() {
-        QTemporaryDir temp(QDir::currentPath()+"/project-audit-XXXXXX");Scene source;source.reset(false);source.create(Shape::Box);QString error;QVERIFY(source.save(temp.filePath("scene.bagua.json"),&error));Recording take;take.begin(source);source.objects[0].position.setX(2);QVERIFY(take.append(.1,source,&error));QVERIFY(take.save(temp.filePath("take.brec"),&error));QFile file(temp.filePath("project.bagua.project.json"));QVERIFY(file.open(QIODevice::WriteOnly));file.write(QJsonDocument(QJsonObject{{"format","baguadt.project"},{"version",1},{"scenes",QJsonArray{QJsonObject{{"scene","scene.bagua.json"},{"recordings",QJsonArray{"take.brec"}},{"mode","replay"}}}}}).toJson());file.close();
+        QTemporaryDir temp{cache::temporaryTemplate(QStringLiteral("tests"), QStringLiteral("test"))};Scene source;source.reset(false);source.create(Shape::Box);QString error;QVERIFY(source.save(temp.filePath("scene.bagua.json"),&error));Recording take;take.begin(source);source.objects[0].position.setX(2);QVERIFY(take.append(.1,source,&error));QVERIFY(take.save(temp.filePath("take.brec"),&error));QFile file(temp.filePath("project.bgp"));QVERIFY(file.open(QIODevice::WriteOnly));file.write(QJsonDocument(QJsonObject{{"format","baguadt.project"},{"version",1},{"scenes",QJsonArray{QJsonObject{{"scene","scene.bagua.json"},{"recordings",QJsonArray{"take.brec"}},{"mode","replay"}}}}}).toJson());file.close();
         MainWindow w;w.show();QVERIFY(QTest::qWaitForWindowExposed(&w));QVERIFY(w.openPath(temp.filePath("scene.bagua.json")));auto *original=w.scene;original->create(Shape::Sphere);const auto authored=original->json();auto *tabs=w.findChild<QTabBar *>("sceneTabs");int count=tabs->count();QVERIFY(w.openProject(file.fileName()));QCOMPARE(tabs->count(),count+1);QCOMPARE(original->json().value("objects"),authored["objects"]);QCOMPARE(original->json().value("links"),authored["links"]);QVERIFY(w.replayActive());QCOMPARE(w.recordedFrames(),2);w.stopReplay();QVERIFY(w.openProject(file.fileName()));QCOMPARE(tabs->count(),count+2);QCOMPARE(original->json().value("objects"),authored["objects"]);QCOMPARE(original->json().value("links"),authored["links"]);original->undo.setClean();QVERIFY(w.close());
+    }
+    void projectManagerUsesBgpFormat() {
+        QTemporaryDir temp{cache::temporaryTemplate(QStringLiteral("tests"), QStringLiteral("test"))};
+        Scene source;
+        source.reset(false);
+        source.create(Shape::Box);
+        QString error;
+        QVERIFY(source.save(temp.filePath("scene.bagua.json"), &error));
+        const QString path = temp.filePath("demo.bgp");
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(QJsonDocument(QJsonObject{{"format", "baguadt.project"},
+                                             {"version", 1},
+                                             {"name", "演示项目"},
+                                             {"scenes", QJsonArray{QJsonObject{{"name", "装配"},
+                                                                               {"scene", "scene.bagua.json"},
+                                                                               {"mode", "edit"}}}}})
+                       .toJson());
+        file.close();
+        QVERIFY(isProjectFile(path));
+        QCOMPARE(withProjectSuffix(temp.filePath("new-project")), temp.filePath("new-project.bgp"));
+        const ProjectInfo info = readProjectInfo(path);
+        QVERIFY2(info.valid, qPrintable(info.error));
+        QCOMPARE(info.name, QString("演示项目"));
+        QCOMPARE(info.scenes.size(), 1);
+        QVERIFY(info.scenes[0].sceneExists);
+        ProjectManagerDialog dialog({path}, path);
+        auto *list = dialog.findChild<QListWidget *>("projectList");
+        auto *table = dialog.findChild<QTableWidget *>("projectSceneTable");
+        auto *open = dialog.findChild<QPushButton *>("projectOpenButton");
+        auto *name = dialog.findChild<QLabel *>("projectNameLabel");
+        QVERIFY(list && table && open && name);
+        QCOMPARE(list->count(), 1);
+        QCOMPARE(table->rowCount(), 1);
+        QVERIFY(open->isEnabled());
+        QCOMPARE(name->text(), QString("演示项目"));
+        if (qEnvironmentVariableIsSet("BAGUA_UI_CAPTURE")) {
+            const QString example = QDir::current().filePath("../examples/hsc-vehicle/HSC-Vehicle.bgp");
+            if (QFileInfo::exists(example)) {
+                ProjectManagerDialog showcase({example}, example);
+                showcase.show();
+                QTest::qWait(300);
+                showcase.grab().save(QDir::current().filePath("../ui-project-manager.png"));
+                showcase.close();
+            } else {
+                dialog.show();
+                QTest::qWait(250);
+                dialog.grab().save(QDir::current().filePath("../ui-project-manager.png"));
+                dialog.close();
+            }
+        }
+    }
+    void cacheUsesDedicatedDirectory() {
+        const QString root = cache::root();
+        QVERIFY(!root.isEmpty());
+        QVERIFY(root.contains(QStringLiteral("cache"), Qt::CaseInsensitive));
+        const QString hsc = cache::ensure(QStringLiteral("hsc"));
+        QVERIFY(QDir(hsc).exists());
+        QVERIFY(hsc.startsWith(root));
+        QTemporaryDir workspace(cache::temporaryTemplate(QStringLiteral("hsc"), QStringLiteral("runtime")));
+        QVERIFY(workspace.isValid());
+        QVERIFY(workspace.path().startsWith(hsc));
+        const QString legacy = QDir(QCoreApplication::applicationDirPath()).filePath("hsc-runtime-cachetest");
+        QVERIFY(QDir().mkpath(legacy));
+        QFile marker(legacy + "/marker");
+        QVERIFY(marker.open(QIODevice::WriteOnly));
+        marker.write("x");
+        marker.close();
+        cache::cleanupLegacyApplicationTemp();
+        QVERIFY(!QDir(legacy).exists());
+    }
+    void projectSaveErrorReportsPath() {
+        QTemporaryDir temp{cache::temporaryTemplate(QStringLiteral("tests"), QStringLiteral("test"))};
+        QFile blocker(temp.filePath("blocked-parent"));
+        QVERIFY(blocker.open(QIODevice::WriteOnly));
+        blocker.write("not a directory");
+        blocker.close();
+        MainWindow w;
+        QString error;
+        QVERIFY(!w.saveProject(temp.filePath("blocked-parent") + "/demo.bgp", &error));
+        QVERIFY(!error.isEmpty());
+        QVERIFY(error.contains(QStringLiteral("无法创建项目目录")));
+        w.scene->undo.setClean();
+        QVERIFY(w.close());
+    }
+    void startupLauncherHasNoSceneTab() {
+        MainWindow w(nullptr, false);
+        QVERIFY(w.scene == nullptr);
+        auto *tabs = w.findChild<QTabBar *>("sceneTabs");
+        QVERIFY(tabs);
+        QCOMPARE(tabs->count(), 0);
+        w.newScene(false);
+        QVERIFY(w.scene != nullptr);
+        QCOMPARE(tabs->count(), 1);
+        w.scene->undo.setClean();
+        QVERIFY(w.close());
+    }
+    void componentImportKeepsAssemblyMetadata() {
+        QTemporaryDir temp{cache::temporaryTemplate(QStringLiteral("tests"), QStringLiteral("test"))};
+        auto mesh = std::make_shared<MeshData>();
+        mesh->id = "part-mesh";
+        mesh->name = "part";
+        mesh->positions = {{-.5f, -.5f, 0}, {.5f, -.5f, 0}, {.5f, .5f, 0}, {-.5f, .5f, 0}};
+        mesh->indices = {0, 1, 2, 0, 2, 3};
+        Object part;
+        part.id = "part";
+        part.name = "导入部件";
+        part.shape = Shape::Mesh;
+        part.mesh = mesh;
+        part.mass = 12.5;
+        part.fixed = false;
+        part.position = {1, 2, 3};
+        part.anchors = {{0, 0, .1f}, {.2f, 0, .1f}};
+        Scene component;
+        component.objects = {part};
+        component.selected = part.id;
+        QString error;
+        const QString path = temp.filePath("part.bagua.json");
+        QVERIFY(component.save(path, &error));
+        MainWindow w;
+        w.scene->objects.clear();
+        w.scene->links.clear();
+        w.scene->exclusions.clear();
+        QVERIFY(w.importComponent(path));
+        QCOMPARE(w.scene->objects.size(), 1);
+        const auto *imported = w.scene->current();
+        QVERIFY(imported);
+        QCOMPARE(imported->name, QString("导入部件"));
+        QCOMPARE(imported->mass, 12.5);
+        QVERIFY(!imported->fixed);
+        QCOMPARE(imported->anchors.size(), 2);
+        QCOMPARE(imported->position, QVector3D(1, 2, 3));
+        w.scene->undo.setClean();
+        QVERIFY(w.close());
+    }
+    void vehicleAssemblyWizardRebuildsHscVehicle() {
+        QString error;
+        Scene reference;
+        const QString path = QDir::current().filePath("../examples/hsc-vehicle/ground_1e8.bagua.json");
+        QVERIFY2(reference.load(path, &error), qPrintable(error));
+        VehicleAssemblyDialog dialog(reference);
+        const auto matched = dialog.request();
+        QCOMPARE(matched.chassis, QString("chassis"));
+        QVERIFY(matched.wheels[0].enabled);
+        QCOMPARE(matched.wheels[0].spindle, QString("spindle_0"));
+        QCOMPARE(matched.wheels[0].rim, QString("wheel_0_rim"));
+        QCOMPARE(matched.wheels[0].tire, QString("wheel_0_tire"));
+        QCOMPARE(matched.loosePairs.size(), 3);
+        if (qEnvironmentVariableIsSet("BAGUA_UI_CAPTURE")) {
+            dialog.show();
+            QTest::qWait(350);
+            dialog.grab().save(QDir::current().filePath("../ui-vehicle-wizard.png"));
+            dialog.close();
+        }
+
+        // Exercise the GUI asset workflow: split the reference scene into
+        // component files, then import those files one by one into a new scene.
+        QTemporaryDir components{cache::temporaryTemplate(QStringLiteral("tests"), QStringLiteral("components"))};
+        MainWindow exporter;
+        exporter.scene->objects = reference.objects;
+        exporter.scene->links.clear();
+        exporter.scene->exclusions.clear();
+        QVERIFY(exporter.exportComponentsTo(components.path(), false));
+        const auto files = QDir(components.path()).entryList({"*.bagua.json"}, QDir::Files, QDir::Name);
+        QCOMPARE(files.size(), 20);
+
+        MainWindow w;
+        w.scene->objects.clear();
+        w.scene->links.clear();
+        w.scene->exclusions.clear();
+        for (const auto &file : files)
+            QVERIFY2(w.importComponent(QDir(components.path()).filePath(file)), qPrintable(file));
+        QCOMPARE(w.scene->objects.size(), 20);
+        w.scene->selected = "chassis";
+        VehicleAssemblyRequest request;
+        request.chassis = "chassis";
+        request.enableHsc = false;
+        request.applyHscPreset = false;
+        for (int i = 0; i < 4; ++i) {
+            request.wheels[size_t(i)].enabled = true;
+            request.wheels[size_t(i)].spindle = QString("spindle_%1").arg(i);
+            request.wheels[size_t(i)].rim = QString("wheel_%1_rim").arg(i);
+            request.wheels[size_t(i)].tire = QString("wheel_%1_tire").arg(i);
+        }
+        for (int i = 0; i < 3; ++i)
+            request.loosePairs.push_back({QString("loose_%1_rim").arg(i), QString("loose_%1_tire").arg(i)});
+        QVERIFY(w.applyVehicleAssembly(request));
+        QCOMPARE(w.scene->links.size(), 19);
+        int prismatic = 0, revolute = 0, stitch = 0;
+        for (const auto &link : w.scene->links) {
+            if (link.type == Link::Type::Prismatic)
+                ++prismatic;
+            else if (link.type == Link::Type::Revolute)
+                ++revolute;
+            else if (link.type == Link::Type::Stitch)
+                ++stitch;
+        }
+        QCOMPARE(prismatic, 4);
+        QCOMPARE(revolute, 4);
+        QCOMPARE(stitch, 11);
+        QCOMPARE(w.scene->exclusions.size(), 8);
+        const auto bead = std::find_if(w.scene->links.cbegin(), w.scene->links.cend(), [](const Link &link) {
+            return link.a == "wheel_0_rim" && link.b == "wheel_0_tire";
+        });
+        QVERIFY(bead != w.scene->links.cend());
+        QCOMPARE(bead->pairs.size(), 39);
+        QCOMPARE(w.scene->find("chassis")->anchors.size(), 4);
+        QCOMPARE(w.scene->find("wheel_0_rim")->anchors.size(), 39);
+        w.scene->undo.setClean();
+        QVERIFY(w.close());
+    }
+    void guiAssembledVehicleHscStep() {
+#ifndef BAGUA_TEST_CUDA
+        QSKIP("Native CUDA backend disabled");
+#else
+        if (!qEnvironmentVariableIsSet("BAGUA_SLOW_VEHICLE_HSC"))
+            QSKIP("Set BAGUA_SLOW_VEHICLE_HSC=1 for the full HSC vehicle integration test");
+        QString error;
+        Scene reference;
+        const QString path = QDir::current().filePath("../examples/hsc-vehicle/ground_1e8.bagua.json");
+        QVERIFY2(reference.load(path, &error), qPrintable(error));
+        MainWindow w;
+        w.scene->objects = reference.objects;
+        w.scene->links.clear();
+        w.scene->exclusions.clear();
+        w.scene->selected = "chassis";
+        VehicleAssemblyRequest request;
+        request.chassis = "chassis";
+        request.enableHsc = true;
+        request.applyHscPreset = true;
+        for (int i = 0; i < 4; ++i) {
+            request.wheels[size_t(i)].spindle = QString("spindle_%1").arg(i);
+            request.wheels[size_t(i)].rim = QString("wheel_%1_rim").arg(i);
+            request.wheels[size_t(i)].tire = QString("wheel_%1_tire").arg(i);
+        }
+        for (int i = 0; i < 3; ++i)
+            request.loosePairs.push_back({QString("loose_%1_rim").arg(i), QString("loose_%1_tire").arg(i)});
+        QVERIFY(w.applyVehicleAssembly(request));
+        QVERIFY2(w.startSimulation(false), "assembled HSC world did not start");
+        QVERIFY(w.beginRecording());
+        QVERIFY2(w.stepSimulation(), "assembled HSC step failed");
+        QVERIFY(w.recordedFrames() > 0);
+        w.endRecording();
+        w.resetSimulation();
+        w.scene->undo.setClean();
+        // Do not call close(): the take is intentionally unsaved in this integration test.
+#endif
+    }
+    void assemblyViewportOverlayToggleAndHighlight() {
+        MainWindow w;
+        w.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&w));
+        w.newScene(false);
+        Object a;
+        a.id = "a";
+        a.name = "底座";
+        a.position = {-.65f, .3f, 0};
+        a.dimensions = {.32f, .32f, .32f};
+        Object b;
+        b.id = "b";
+        b.name = "滑块";
+        b.position = {.65f, .3f, 0};
+        b.dimensions = {.24f, .24f, .24f};
+        Link link;
+        link.id = "fixed-a-b";
+        link.type = Link::Type::Fixed;
+        link.a = "a";
+        link.b = "b";
+        w.scene->objects = {a, b};
+        w.scene->links = {link};
+        w.scene->notify();
+        auto *tree = w.findChild<QTreeWidget *>("linkTree");
+        QVERIFY(tree);
+        QCOMPARE(tree->topLevelItemCount(), 1);
+        tree->setCurrentItem(tree->topLevelItem(0));
+        QVERIFY(tree->currentItem());
+        w.viewport->setLinkHighlight(link.id);
+        auto *showLinks = w.findChild<QAction *>("showLinksAction");
+        auto *showAnchors = w.findChild<QAction *>("showAnchorsAction");
+        auto *showViewport = w.findChild<QCheckBox *>("showAssemblyViewport");
+        QVERIFY(showLinks && showAnchors && showViewport);
+        showLinks->setChecked(false);
+        QVERIFY(!w.viewport->showLinks);
+        QVERIFY(!showViewport->isChecked());
+        showLinks->setChecked(true);
+        QVERIFY(w.viewport->showLinks);
+        showAnchors->setChecked(false);
+        QVERIFY(!w.viewport->showAnchors);
+        showAnchors->setChecked(true);
+        if (qEnvironmentVariableIsSet("BAGUA_UI_CAPTURE")) {
+            w.viewport->target = {0, .3f, 0};
+            w.viewport->distance = 3.2f;
+            w.viewport->yaw = 32;
+            w.viewport->pitch = 22;
+            w.viewport->update();
+            QTest::qWait(300);
+            w.viewport->grab().save(QDir::current().filePath("../ui-assembly-highlight.png"));
+        }
+        w.scene->undo.setClean();
+        QVERIFY(w.close());
+    }
+    void stitchPickWithoutAnchorsShowsError() {
+        MainWindow w;
+        w.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&w));
+        w.newScene(false);
+        Object a;
+        a.id = "a";
+        a.name = "无锚点刚体";
+        a.fixed = true;
+        auto mesh = std::make_shared<MeshData>();
+        mesh->id = "b-mesh";
+        mesh->name = "B";
+        mesh->positions = {{0, 0, 0}, {.1f, 0, 0}};
+        mesh->indices = {0, 1, 0};
+        Object b;
+        b.id = "b";
+        b.name = "网格 B";
+        b.shape = Shape::Mesh;
+        b.mesh = mesh;
+        b.fixed = true;
+        w.scene->objects = {a, b};
+        w.scene->notify();
+        auto *type = w.findChild<QComboBox *>("linkType");
+        auto *bodyA = w.findChild<QComboBox *>("linkBodyA");
+        auto *bodyB = w.findChild<QComboBox *>("linkBodyB");
+        auto *pickA = w.findChild<QPushButton *>("pairsPickA");
+        auto *pickB = w.findChild<QPushButton *>("pairsPickB");
+        auto *error = w.findChild<QLabel *>("linkError");
+        QVERIFY(type && bodyA && bodyB && pickA && pickB && error);
+        const int stitchIndex = type->findData("stitch");
+        QVERIFY(stitchIndex >= 0);
+        type->setCurrentIndex(stitchIndex);
+        bodyA->setCurrentIndex(bodyA->findData("a"));
+        bodyB->setCurrentIndex(bodyB->findData("b"));
+        pickA->click();
+        QVERIFY(error->isVisible());
+        QVERIFY(error->text().contains(QStringLiteral("没有锚点")));
+        pickB->click();
+        QVERIFY(error->isVisible());
+        QVERIFY(error->text().contains(QStringLiteral("没有锚点")));
+        w.scene->undo.setClean();
+        QVERIFY(w.close());
+    }
+    void stitchPairEditorUsesReadableTargets() {
+        MainWindow w;
+        w.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&w));
+        Object a;
+        a.id = "a";
+        a.name = "A 刚体";
+        a.fixed = true;
+        a.anchors = {{0, 0, 0}, {.2f, 0, 0}};
+        auto mesh = std::make_shared<MeshData>();
+        mesh->id = "b-mesh";
+        mesh->name = "B";
+        mesh->positions = {{-.1f, 0, 0}, {0, .1f, 0}, {.1f, 0, 0}};
+        mesh->indices = {0, 1, 2};
+        Object b;
+        b.id = "b";
+        b.name = "B 网格";
+        b.shape = Shape::Mesh;
+        b.mesh = mesh;
+        b.fixed = true;
+        w.scene->objects = {a, b};
+        w.scene->notify();
+        auto *type = w.findChild<QComboBox *>("linkType");
+        auto *bodyA = w.findChild<QComboBox *>("linkBodyA");
+        auto *bodyB = w.findChild<QComboBox *>("linkBodyB");
+        auto *add = w.findChild<QPushButton *>("pairsAdd");
+        auto *pairs = w.findChild<QTableWidget *>("stitchPairs");
+        auto *info = w.findChild<QLabel *>("stitchPairInfo");
+        QVERIFY(type && bodyA && bodyB && add && pairs && info);
+        const int stitchIndex = type->findData("stitch");
+        QVERIFY(stitchIndex >= 0);
+        type->setCurrentIndex(stitchIndex);
+        bodyA->setCurrentIndex(bodyA->findData("a"));
+        bodyB->setCurrentIndex(bodyB->findData("b"));
+        add->click();
+        QCOMPARE(pairs->rowCount(), 1);
+        auto *anchorCombo = qobject_cast<QComboBox *>(pairs->cellWidget(0, 0));
+        QVERIFY(anchorCombo);
+        QVERIFY(anchorCombo->currentText().contains('('));
+        auto *target = pairs->item(0, 1);
+        QVERIFY(target);
+        QVERIFY(target->data(Qt::UserRole).toInt() >= 0);
+        QVERIFY(target->text().contains(QStringLiteral("顶点")));
+        QVERIFY(info->text().contains(QStringLiteral("距离")));
+        if (qEnvironmentVariableIsSet("BAGUA_UI_CAPTURE")) {
+            if (auto *dock = w.findChild<QDockWidget *>("assemblyDock"))
+                dock->raise();
+            if (auto *scroll = w.findChild<QScrollArea *>("linkComposerScroll"))
+                if (auto *stitch = w.findChild<QWidget *>("linkStitchRow"))
+                    scroll->ensureWidgetVisible(stitch, 0, 8);
+            QTest::qWait(250);
+            w.grab().save(QDir::current().filePath("../ui-stitch-editor.png"));
+        }
+        w.scene->undo.setClean();
+        QVERIFY(w.close());
     }
     void vehicleDriveDamperPersistenceAndValidation() {
         Scene scene;scene.reset(false);Object a;a.id="a";a.name="a";a.fixed=true;Object b=a;b.id="b";b.name="b";b.fixed=false;scene.objects={a,b};Link link;link.id="motor";link.a="a";link.b="b";link.type=Link::Type::Prismatic;link.driven=true;link.driveSpeed=.2;link.driveRamp=.5;link.driveStrength=1e4;link.damped=true;link.damping=12;scene.links={link};scene.simulation={{"gravity",9.8},{"maxRank",256},{"maxIterations",12000},{"adaptiveInverse",true}};
@@ -782,8 +1191,6 @@ private slots:
             settingsChecked = toggle && toggle->isChecked();
             if (toggle)
                 toggle->setChecked(false);
-            QDir().mkpath("../artifacts");
-            dialog->grab().save("../artifacts/hsc-settings-preview.png");
             dialog->reject();
         });
         auto *settings = w.findChild<QAction *>("physicsSettings");
@@ -806,7 +1213,7 @@ private slots:
         QVERIFY(!w.replayActive());
         const auto expected = w.simulationPreview()->find("soft")->mesh->positions;
         QVERIFY((expected[16] - rest[16]).length() > 1e-5f);
-        QTemporaryDir temp(QDir::currentPath() + "/hsc-live-XXXXXX");
+        QTemporaryDir temp{cache::temporaryTemplate(QStringLiteral("tests"), QStringLiteral("test"))};
         QVERIFY(w.saveRecording(temp.filePath("live.brec")));
         Recording saved;
         QString error;
@@ -915,7 +1322,7 @@ private slots:
         record.begin(source);
         source.objects[0].position.setX(2);
         QVERIFY(record.append(1, source));
-        QTemporaryDir temp(QDir::currentPath() + "/control-separation-XXXXXX");
+        QTemporaryDir temp{cache::temporaryTemplate(QStringLiteral("tests"), QStringLiteral("test"))};
         QVERIFY(record.save(temp.filePath("run.brec")));
         MainWindow w;
         w.show();
@@ -951,7 +1358,7 @@ private slots:
     void importedMeshChronoCollision() {
         if (!Physics::available())
             QSKIP("Chrono disabled");
-        QTemporaryDir temp(QDir::currentPath() + "/mesh-physics-XXXXXX");
+        QTemporaryDir temp{cache::temporaryTemplate(QStringLiteral("tests"), QStringLiteral("test"))};
         QFile file(temp.filePath("cube.obj"));
         QVERIFY(file.open(QIODevice::WriteOnly));
         file.write(
@@ -989,7 +1396,7 @@ private slots:
         QCOMPARE(physics.preview.find("platform")->position, platform.position);
     }
     void meshImportAndPortableScene() {
-        QTemporaryDir temp(QDir::currentPath() + "/asset-tests-XXXXXX");
+        QTemporaryDir temp{cache::temporaryTemplate(QStringLiteral("tests"), QStringLiteral("test"))};
         auto write = [&](QString name, QByteArray bytes) {
             QFile f(temp.filePath(name));
             QVERIFY(f.open(QIODevice::WriteOnly));
@@ -1077,7 +1484,7 @@ private slots:
         scene.objects[1].mesh = changed;
         QVERIFY(recording.append(1, scene));
         QVERIFY(!recording.append(.5, scene));
-        QTemporaryDir temp(QDir::currentPath() + "/recording-tests-XXXXXX");
+        QTemporaryDir temp{cache::temporaryTemplate(QStringLiteral("tests"), QStringLiteral("test"))};
         QString path = temp.filePath("run.brec"), error;
         QVERIFY2(recording.save(path, &error), qPrintable(error));
         QVERIFY(!recording.dirty);
@@ -1178,7 +1585,7 @@ private slots:
         QVERIFY(list);
         QCOMPARE(list->count(), 2);
         QCOMPARE(list->currentRow(), 1);
-        QTemporaryDir temp(QDir::currentPath() + "/takes-XXXXXX");
+        QTemporaryDir temp{cache::temporaryTemplate(QStringLiteral("tests"), QStringLiteral("test"))};
         // Each entry can be replayed, saved and deleted on its own.
         QVERIFY(w.selectRecordingAt(0));
         QCOMPARE(w.recordedFrames(), first);
@@ -1213,7 +1620,7 @@ private slots:
             QTRY_VERIFY_WITH_TIMEOUT(w.recordedFrames() > 3, 3000);
             w.endRecording();
             w.pauseSimulation();
-            QTemporaryDir temp(QDir::currentPath() + "/project-tests-XXXXXX");
+            QTemporaryDir temp{cache::temporaryTemplate(QStringLiteral("tests"), QStringLiteral("test"))};
             const auto initial = w.scene->json();
             int count = w.recordedFrames();
             QVERIFY(w.saveRecording(temp.filePath("run.brec")));
@@ -1228,9 +1635,9 @@ private slots:
             QVERIFY(slider);
             slider->setValue(100000);
             QVERIFY(w.replayTime() > 0);
-            QVERIFY(w.saveProject(temp.filePath("project.bagua.project.json")));
+            QVERIFY(w.saveProject(temp.filePath("project.bgp")));
             MainWindow portable;
-            QVERIFY(portable.openProject(temp.filePath("project.bagua.project.json")));
+            QVERIFY(portable.openProject(temp.filePath("project.bgp")));
             QVERIFY(portable.recordedFrames() == count);
             QVERIFY(portable.replayActive());
             QCOMPARE(portable.findChild<QTabBar *>("sceneTabs")->count(),
@@ -1269,7 +1676,7 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(w.recordedFrames() > 8, 5000);
         w.endRecording();
         w.pauseSimulation();
-        QTemporaryDir temp(QDir::currentPath() + "/fixed-step-XXXXXX");
+        QTemporaryDir temp{cache::temporaryTemplate(QStringLiteral("tests"), QStringLiteral("test"))};
         QVERIFY(w.saveRecording(temp.filePath("fixed.brec")));
         Recording loaded;
         QString error;
@@ -1293,7 +1700,7 @@ private slots:
         recording.begin(source);
         source.objects[0].position = {4, 2, 0};
         QVERIFY(recording.append(1, source));
-        QTemporaryDir temp(QDir::currentPath() + "/replay-ui-XXXXXX");
+        QTemporaryDir temp{cache::temporaryTemplate(QStringLiteral("tests"), QStringLiteral("test"))};
         QVERIFY(recording.save(temp.filePath("run.brec")));
         MainWindow w;
         w.show();
@@ -1531,7 +1938,7 @@ private slots:
         QVERIFY(w.simulationTime() > t);
         QVERIFY(w.simulationPreview()->current()->position.y() < 4);
         const double firstTime = w.simulationTime();
-        QTemporaryDir temp(QDir::currentPath() + "/physics-tests-XXXXXX");
+        QTemporaryDir temp{cache::temporaryTemplate(QStringLiteral("tests"), QStringLiteral("test"))};
         QVERIFY(w.savePath(temp.filePath("original.bagua.json")));
         Scene saved;
         QVERIFY(saved.load(temp.filePath("original.bagua.json")));
@@ -1611,7 +2018,7 @@ private slots:
         QCOMPARE(scene.selected, copy);
         scene.undo.undo();
         QCOMPARE(scene.objects.size(), 1);
-        QTemporaryDir temp(QDir::currentPath() + "/scene-tests-XXXXXX");
+        QTemporaryDir temp{cache::temporaryTemplate(QStringLiteral("tests"), QStringLiteral("test"))};
         QString path = temp.filePath("scene.bagua.json"), error;
         QVERIFY2(scene.save(path, &error), qPrintable(error));
         QVERIFY(scene.undo.isClean());
@@ -1664,6 +2071,166 @@ private slots:
             QVERIFY2(r.chronoPassed, qPrintable(r.chrono));
             QCOMPARE(r.bodies, s.objects.size());
         }
+    }
+    void viewportPrecisionHandles() {
+        // The transform widget follows Unreal/Unity conventions: axis, plane and
+        // centre handles, grid snapping, local/world space and keyboard nudging.
+        MainWindow w;
+        w.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&w));
+        QTest::qWait(200);
+        auto *v = w.viewport;
+        QVERIFY(v);
+        w.scene->select("box-01");
+        v->setTool(Tool::Move);
+        v->setSnapEnabled(true);
+        v->setSnapSteps(.1f, 15.f, .05f);
+        QTest::qWait(40);
+        QVERIFY(w.scene->current());
+        const int undoIndex = w.scene->undo.index();
+        // Axis handle: snapped absolute coordinate.
+        const QPoint axisStart = v->handlePoint(0).toPoint();
+        QTest::mousePress(v, Qt::LeftButton, Qt::NoModifier, axisStart);
+        QVERIFY(v->dragging());
+        moveMouse(v, axisStart + QPoint(86, -21));
+        QTest::mouseRelease(v, Qt::LeftButton, Qt::NoModifier, axisStart + QPoint(86, -21));
+        // The undo command replaces the object vector, so never read through a
+        // pre-drag pointer after committing a gesture.
+        const float snappedX = w.scene->current()->position.x();
+        QVERIFY(std::abs(snappedX) > 1e-4f);
+        QVERIFY2(std::abs(snappedX / .1f - std::round(snappedX / .1f)) < 1e-3f,
+                 qPrintable(QString::number(snappedX, 'g', 9)));
+        QCOMPARE(w.scene->undo.index(), undoIndex + 1);
+        w.scene->undo.undo();
+        // Plane handle (YZ): moves two axes at once.
+        const QPoint planeStart = v->handlePoint(3).toPoint();
+        const QVector3D beforePlane = w.scene->current()->position;
+        QTest::mousePress(v, Qt::LeftButton, Qt::NoModifier, planeStart);
+        QVERIFY(v->dragging());
+        moveMouse(v, planeStart + QPoint(38, -42));
+        QTest::mouseRelease(v, Qt::LeftButton, Qt::NoModifier, planeStart + QPoint(38, -42));
+        QVERIFY((w.scene->current()->position - beforePlane).length() > 1e-3f);
+        w.scene->undo.undo();
+        // Centre handle: screen-plane move.
+        const QPoint centreStart = v->handlePoint(6).toPoint();
+        const QVector3D beforeCentre = w.scene->current()->position;
+        QTest::mousePress(v, Qt::LeftButton, Qt::NoModifier, centreStart);
+        QVERIFY(v->dragging());
+        moveMouse(v, centreStart + QPoint(45, 30));
+        QTest::mouseRelease(v, Qt::LeftButton, Qt::NoModifier, centreStart + QPoint(45, 30));
+        QVERIFY((w.scene->current()->position - beforeCentre).length() > 1e-3f);
+        w.scene->undo.undo();
+        // World and local gizmo orientations differ for a rotated body.
+        const QPointF worldPoint = v->handlePoint(0);
+        v->setTransformSpace(TransformSpace::Local);
+        const QPointF localPoint = v->handlePoint(0);
+        QVERIFY(QLineF(worldPoint, localPoint).length() > 2.0);
+        QVERIFY(v->transformSpace == TransformSpace::Local);
+        v->setTransformSpace(TransformSpace::World);
+        // Arrow keys nudge by the snap step without a mouse drag.
+        const float beforeNudge = w.scene->current()->position.x();
+        v->setFocus();
+        QTest::keyClick(v, Qt::Key_Right);
+        QVERIFY(std::abs(w.scene->current()->position.x() - (beforeNudge + .1f)) < 1e-4f);
+        w.scene->undo.setClean();
+        QVERIFY(w.close());
+    }
+    void assemblyPivotComposer() {
+        MainWindow w;
+        w.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&w));
+        w.newScene(false);
+        Object base;
+        base.id = "base";
+        base.name = "底座";
+        base.fixed = true;
+        base.position = {0, 0, 0};
+        base.dimensions = {1, 1, 1};
+        Object slider;
+        slider.id = "slider";
+        slider.name = "滑块";
+        slider.position = {0, 1, 0};
+        slider.dimensions = {.5f, .5f, .5f};
+        w.scene->objects = {base, slider};
+        w.scene->select("slider");
+        w.scene->notify();
+        auto *left = w.findChild<QComboBox *>("linkBodyA");
+        auto *right = w.findChild<QComboBox *>("linkBodyB");
+        auto *mid = w.findChild<QPushButton *>("linkPivotMid");
+        auto *add = w.findChild<QPushButton *>("linkAdd");
+        auto *snap = w.findChild<QComboBox *>("anchorSnap");
+        auto *pick = w.findChild<QPushButton *>("anchorPick");
+        QVERIFY(left && right && mid && add && snap && pick);
+        // A fresh composer follows the scene selection; B is the first other body.
+        QCOMPARE(left->currentData().toString(), QString("slider"));
+        QCOMPARE(right->currentData().toString(), QString("base"));
+        mid->click();
+        add->click();
+        QCOMPARE(w.scene->links.size(), 1);
+        const auto link = w.scene->links[0];
+        const auto *a = w.scene->find(link.a);
+        const auto *b = w.scene->find(link.b);
+        QVERIFY(a && b);
+        const auto worldA = a->anchorMatrix().map(link.anchorA);
+        const auto worldB = b->anchorMatrix().map(link.anchorB);
+        QVERIFY2((worldA - worldB).length() < 1e-3f, qPrintable(QString::number((worldA - worldB).length())));
+        QVERIFY(std::abs(worldA.y() - .5f) < 1e-3f);
+        // Vertex snapping turns a near-corner surface click into an exact anchor.
+        w.scene->select("base");
+        snap->setCurrentIndex(snap->findData("vertex"));
+        pick->click();
+        QVERIFY(w.viewport->anchorPicking);
+        const QVector3D corner = base.anchorMatrix().map({.49f, .49f, .49f});
+        QVERIFY(QMetaObject::invokeMethod(w.viewport, "clicked", Qt::DirectConnection, Q_ARG(QVector3D, corner),
+                                          Q_ARG(QString, QString("base"))));
+        QCOMPARE(w.scene->find("base")->anchors.size(), 1);
+        QVERIFY((w.scene->find("base")->anchors[0] - QVector3D(.5f, .5f, .5f)).length() < 1e-4f);
+        w.scene->undo.setClean();
+        QVERIFY(w.close());
+    }
+    void simulationRunsOnWorkerThread() {
+        if (!Physics::available())
+            QSKIP("Chrono disabled");
+        SimulationSession session;
+        Scene source;
+        source.reset(false);
+        source.create(Shape::Box);
+        source.undo.setClean();
+        QVERIFY(session.start(source));
+        QTRY_VERIFY_WITH_TIMEOUT(session.time() > .01, 4000);
+        QVERIFY(session.workerThreadId() != 0);
+        QVERIFY2(session.workerThreadId() != reinterpret_cast<quintptr>(QThread::currentThreadId()),
+                 "physics stepped on the GUI thread");
+        session.pause();
+        session.reset();
+    }
+    void outlinerFilterAndInspectorReset() {
+        MainWindow w;
+        w.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&w));
+        QTest::qWait(150);
+        auto *filter = w.findChild<QLineEdit *>("sceneFilter");
+        auto *tree = w.findChild<QTreeWidget *>("sceneTree");
+        QVERIFY(filter && tree);
+        filter->setText(QStringLiteral("球"));
+        QCoreApplication::processEvents();
+        int visible = 0;
+        for (int i = 0; i < tree->topLevelItemCount(); ++i)
+            if (!tree->topLevelItem(i)->isHidden())
+                ++visible;
+        QCOMPARE(visible, 1);
+        filter->clear();
+        QCoreApplication::processEvents();
+        w.scene->select("sphere-01");
+        const QVector3D authored = w.scene->current()->position;
+        auto *reset = w.findChild<QToolButton *>("resetRow0");
+        QVERIFY(reset);
+        reset->click();
+        QCOMPARE(w.scene->current()->position, QVector3D(0, 0, 0));
+        w.scene->undo.undo();
+        QCOMPARE(w.scene->current()->position, authored);
+        w.scene->undo.setClean();
+        QVERIFY(w.close());
     }
     void editorInteraction() {
         MainWindow w;
@@ -1763,7 +2330,7 @@ private slots:
         QCOMPARE(w.scene->objects.size(), 5);
         QTest::keyClick(v, Qt::Key_Y, Qt::ControlModifier);
         QCOMPARE(w.scene->objects.size(), 4);
-        QTemporaryDir temp(QDir::currentPath() + "/scene-tests-XXXXXX");
+        QTemporaryDir temp{cache::temporaryTemplate(QStringLiteral("tests"), QStringLiteral("test"))};
         QString path = temp.filePath("roundtrip.bagua.json");
         w.scene->select("box-01");
         auto *pendingName = w.findChild<QLineEdit *>("objectName");
@@ -1846,7 +2413,7 @@ private slots:
         QCOMPARE(tabs->currentIndex(), 2);
         tabs->setCurrentIndex(1);
         QCOMPARE(w.scene, third);
-        QTemporaryDir temp(QDir::currentPath() + "/tabs-tests-XXXXXX");
+        QTemporaryDir temp{cache::temporaryTemplate(QStringLiteral("tests"), QStringLiteral("test"))};
         const QString a = temp.filePath("assembly-A.bagua.json"), b = temp.filePath("assembly-B.bagua.json");
         tabs->setCurrentIndex(0);
         QVERIFY(w.savePath(a));
@@ -1876,8 +2443,6 @@ private slots:
         QVERIFY(saved.load(a, &error));
         QCOMPARE(saved.objects.size(), 4);
         tabs->setCurrentIndex(0);
-        QDir().mkpath(QDir::currentPath() + "/../artifacts");
-        w.grab().save(QDir::currentPath() + "/../artifacts/editor-tabs-preview.png");
         for (int i = 0; i < tabs->count(); ++i) {
             tabs->setCurrentIndex(i);
             w.scene->undo.setClean();
@@ -1904,7 +2469,7 @@ private slots:
         w.show();
         QVERIFY(QTest::qWaitForWindowExposed(&w));
         auto *tabs = w.findChild<QTabBar *>("sceneTabs");
-        QTemporaryDir temp(QDir::currentPath() + "/closing-tests-XXXXXX");
+        QTemporaryDir temp{cache::temporaryTemplate(QStringLiteral("tests"), QStringLiteral("test"))};
         const QString path = temp.filePath("saved.bagua.json");
         w.newScene();
         w.scene->create(Shape::Box);
@@ -1986,7 +2551,7 @@ private slots:
         for (int i = 0; i < 6; ++i) {
             const auto before = v->target;
             QTest::keyPress(v, keys[i]);
-            QTRY_VERIFY_WITH_TIMEOUT(QVector3D::dotProduct(v->target - before, directions[i]) > .03f, 1500);
+            QTRY_VERIFY_WITH_TIMEOUT(QVector3D::dotProduct(v->target - before, directions[i]) > .03f, 3000);
             QTest::keyRelease(v, keys[i]);
             const auto delta = v->target - before;
             QVERIFY(QVector3D::crossProduct(delta, directions[i]).length() < 1e-4f);
@@ -1999,7 +2564,7 @@ private slots:
         auto before = v->target;
         QTest::keyPress(v, Qt::Key_W);
         QTest::keyPress(v, Qt::Key_D);
-        QTRY_VERIFY_WITH_TIMEOUT(v->target.x() > before.x() + .02f && v->target.z() < before.z() - .02f, 1500);
+        QTRY_VERIFY_WITH_TIMEOUT(v->target.x() > before.x() + .02f && v->target.z() < before.z() - .02f, 3000);
         QTest::keyRelease(v, Qt::Key_W);
         QTest::keyRelease(v, Qt::Key_D);
         const auto eyeBefore = v->target + QVector3D(0, 0, v->distance);

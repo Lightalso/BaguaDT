@@ -149,7 +149,7 @@ def main():
     project = {'format': 'baguadt.project', 'version': 1, 'name': 'HSC 车辆越障复现 · 完整运行结果',
                'scenes': [{'name': f"HSC · 地面胎 E={case[-3:]} Pa", 'recording': f'{case}.brec'}
                           for case in ('ground_1e8', 'ground_1e6')]}
-    (args.output/'HSC.bagua.project.json').write_text(json.dumps(project, indent=2, ensure_ascii=False), encoding='utf-8')
+    (args.output/'HSC.bgp').write_text(json.dumps(project, indent=2, ensure_ascii=False), encoding='utf-8')
     (args.output/'validation.json').write_text(json.dumps(validation, indent=2), encoding='utf-8')
     notices = args.source/'reproduction/vehicle_research'
     shutil.copy2(notices/'THIRD_PARTY_NOTICES.md', args.output/'SOURCE_NOTICES.md')

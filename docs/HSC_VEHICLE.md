@@ -4,6 +4,8 @@
 
 工具菜单的“导入 HSC 整车装配”从原复现项目读取几何和清单，生成一个独立可编辑场景并开启 HSC。也可直接打开 `examples/hsc-vehicle/ground_1e8.bagua.json` 或 `ground_1e6.bagua.json`。这些是待求解的初始状态；`examples/HSC` 中既有文件仍是原工程运行结果的回放。
 
+若要验证纯 GUI 重建流程：打开 `ground_1e8.bagua.json`，在资产记录页「拆分全部…」，新建场景后逐个「导入组件…」，再用「工具 → 车辆四轮装配向导…」生成四轮悬挂与 7 组胎唇缝合。完整步骤见 [交互与装配操作](INTERACTION.md#从组件到整车纯-gui-流程)。
+
 命令行重新导入：
 
 ```powershell

@@ -1,6 +1,6 @@
 # 可重新求解的 HSC 整车
 
-使用包内 `OpenHSCVehicle.cmd` 或工具菜单“打开 HSC 整车仿真示例”，打开 `HSC-Vehicle.bagua.project.json`。两页签分别包含 `ground_1e8.bagua.json` 与 `ground_1e6.bagua.json` 的完整初始装配，顶栏开始物理模拟。底部播放控制只操作记录；它不会启动求解。
+使用包内 `OpenHSCVehicle.cmd` 或项目菜单“打开 HSC 整车示例”，打开 `HSC-Vehicle.bgp`。两页签分别包含 `ground_1e8.bagua.json` 与 `ground_1e6.bagua.json` 的完整初始装配，顶栏开始物理模拟。底部播放控制只操作记录；它不会启动求解。
 
 `validation/ground_1e8.partial.brec` 为此次实际求解的部分试跑：13 步、0.433333 s，含初始状态共 14 帧。已重新打开并逐帧验证。按用户要求未继续整程计算，未完成越障；详细指标见 [验证报告](../../docs/HSC_VEHICLE_VALIDATION.md)。
 

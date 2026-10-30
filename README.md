@@ -4,7 +4,7 @@
 
 已完成场景编辑、Project Chrono 刚体动力学 / 碰撞、弹性盒与四面体 FEM、关节约束，以及可开关的原生物理后端（12 自由度 ABD、IPC 接触与 CCD、Newton 与 CUDA HSC 求解）；尚未接入 VR。
 
-现支持 **OBJ / STL / ASCII PLY / Gmsh 四面体资产导入、便携项目保存、仿真录制与刚体/变形网格回放**。内附 HSC 车辆越障两组真实运行结果：文件 → 打开 HSC 车辆回放项目，或运行包内 `OpenHSC.cmd`。操作与范围见 [资产和回放说明](docs/ASSETS_AND_REPLAY.md)，自定义数据格式见 [记录格式 v1](docs/RECORDING_FORMAT.md)。
+现支持 **OBJ / STL / ASCII PLY / Gmsh 四面体资产导入、便携 `.bgp` 项目保存、仿真录制与刚体/变形网格回放**。内附 HSC 车辆越障两组真实运行结果：项目 → 打开 HSC 车辆回放项目，或运行包内 `OpenHSC.cmd`。操作与范围见 [资产和回放说明](docs/ASSETS_AND_REPLAY.md)，自定义数据格式见 [记录格式 v1](docs/RECORDING_FORMAT.md)。
 
 两个可实时求解的示例：工具 → 打开 HSC 原生接触示例（`OpenHSCNative.cmd`）与工具 → 打开 HSC 刚柔耦合示例（`OpenHSCCoupled.cmd`）；开关在工具 → 物理模拟设置。开启 HSC 会替换整套物理模块，改用原生 libuipc 后端；关闭则使用 Chrono 原有链路。两条链的物理模型不同，不能互相作为同一算法的对照。[研究结论、接入路线和范围](docs/HSC_INTEGRATION.md)。
 
@@ -14,15 +14,76 @@
 
 界面采用紧凑的 Windows 浅色桌面风格：原生控件、9 pt 字体、16 px 工具栏图标、至少 22 px 高的属性输入框和 XYZ 对齐的属性表格。上述尺寸为 Qt 逻辑尺寸，随 Windows DPI 缩放。默认窗口为 1280 × 800，侧栏和底部面板可拖动调整，属性面板支持滚动。
 
-装配界面位于底部「装配 · 链接」页签（可通过视图菜单恢复），支持链接创建/更新/删除、锚点点选与数值编辑、轴线显示、缝合配对和接触排除。运行时显示关节诊断。接手修正与尚未完成项见 [审计报告](docs/AUDIT_2026-10-19.md)。
+交互按 Unreal Editor / Unity Editor 的习惯组织：变换工具带轴向、平面和中心操作柄，世界/局部坐标系切换，网格吸附与精细步长，属性数值可拖动刷值，场景树可过滤。完整操作表见 [交互与装配操作](docs/INTERACTION.md)。
+
+物理求解运行在独立工作线程：HSC / Chrono 世界的构建、推进和销毁都在工作线程完成，界面线程只接收不可变的场景快照并刷新视口、状态栏和约束诊断。因此运行仿真、暂停、单步或重置时，视口相机、面板选择和滚动不会被求解器阻塞。
+
+装配界面位于右侧「装配 · 约束」页签（与属性页签并列，可通过视图菜单恢复）：上方是约束列表，下方是编排器。选中部件后拾取 A/B、设置共同连接点、轴向与参数，点击“新建约束”即可；选中列表项时视口高亮对应锚点、轴线与实时诊断。锚点支持表面、顶点、面中心吸附，接触排除单独成页。运行时显示关节诊断。接手修正与尚未完成项见 [审计报告](docs/AUDIT_2026-10-19.md)。
+
+## 项目管理与 `.bgp`
+
+项目使用专用后缀 **`.bgp`**，清单保存场景和录制的相对路径，场景文件与 `.data-*` 资源目录随项目目录移动。顶部「项目」菜单提供：
+
+- **项目管理…**（`Ctrl+Shift+O`）：最近项目列表、场景/录制清单、缺失文件检查、打开与新建。
+- **从当前页签新建项目…**（`Ctrl+Shift+N`）：把当前所有场景页签保存为新的 `.bgp`。
+- **打开项目…**、**保存项目**（`Ctrl+Alt+S`）、**项目另存为…**。
+- 打开 HSC 车辆回放项目 / 整车示例。
+
+首次启动时项目管理会列出内置示例 `examples/HSC/HSC.bgp` 与 `examples/hsc-vehicle/HSC-Vehicle.bgp`。旧版 `.bagua.project.json` 仍可打开；再次保存会生成 `.bgp` 项目。项目格式解析与目录安全检查在 `src/io/ProjectFile.*`，只读的项目浏览界面在 `src/ui/ProjectManagerDialog.*`。
+
+## 从组件到整车的 GUI 流程
+
+`ground_1e8/ground_1e6` 这类复杂算例现在可以按下面的图形界面路径重建，不需要命令行或手写 JSON：
+
+1. 打开 `examples/hsc-vehicle/ground_1e8.bagua.json`，在底部「资产记录」点「拆分全部…」，把 20 个对象导出为独立 `.bagua.json` 组件（保留网格、四面体、质量、固定状态、锚点）。
+2. 新建场景或 `.bgp` 项目，用「资产记录 → 导入组件…」逐个导入组件；也可直接用「导入网格…」导入 OBJ / STL / PLY / MSH。
+3. 打开「工具 → 车辆四轮装配向导…」或装配面板的「车辆装配向导…」：
+   - 选择车架；
+   - 四行分别选择 FL/FR/RL/RR 的转向节、轮辋、轮胎；
+   - 可选 3 组松散轮胎；
+   - 设置悬挂、弹簧、驱动、胎唇缝合参数并启用 HSC 预设。
+4. 点「生成装配」，向导自动建立移动副、弹簧缝合、转动副、轮辋-轮胎缝合和接触排除，并设为动态。
+5. F5 开始 HSC 仿真，底部「● 录制」或「▶● 模拟并录制」保存回放。
+
+纯 GUI 生成的整车装配已通过完整 HSC 集成测试：从组件拆分 / 逐个导入 / 装配向导到 HSC 首帧推进并录制一帧。原始 HSC `geometry.npz` / `tire_tet4.npz` 仍由既有转换脚本处理；组件资产之后的步骤不再依赖 Python。详细操作见 [交互与装配操作](docs/INTERACTION.md)。
+
+## 在 Qt Creator 中打开
+
+项目根目录只保留 CMake 项目，`CMakePresets.json` 提供两套配置；qmake 回退项目位于 `qmake/`，不会被 Qt Creator 当作默认项目。
+
+- **默认（完整功能）**：Qt Creator →「文件 → 打开文件或项目」→ 选择根目录的 `CMakeLists.txt`（或直接打开 `CMakePresets.json`）。
+  - Configure Preset 选择 **Qt Creator · Full (CUDA + Chrono) — 默认**：完整编辑器、HSC/Chrono 后端和测试。
+  - 已注册 **Desktop Qt 6.8.3 MSVC2022 64-bit** kit，并设为 Qt Creator 默认 kit。
+  - 只做界面/装配逻辑开发时选择 **Qt Creator · Editor only**：不依赖 CUDA/Chrono，配置更快。
+- **qmake**：如需轻量编辑器项目，显式打开 `qmake/BaguaDT.pro`。它不编译 CUDA/Chrono/HSC；完整算例仍请使用 CMake preset。
+- **运行示例**：在 Qt Creator 的 Projects → Run → Working directory 设为项目根目录，程序即可从 `examples/` 找到示例；否则项目菜单也可用绝对路径浏览。
+- **路径**：`CMakePresets.json` 使用 `${sourceDir}/.deps/...`；若 Qt、CUDA 或显卡架构不同，复制为 `CMakeUserPresets.json` 后覆盖 `CMAKE_PREFIX_PATH`、`CMAKE_CUDA_COMPILER` 和 `CMAKE_CUDA_ARCHITECTURES`，不要修改共享 preset。
+- **运行库**：CMake 构建后会把 `.deps/chrono-install/bin` 和 `.deps/hsc-native/build/Release/bin` 中的 DLL 复制到可执行文件旁，F5 运行时不需要手工设置 DLL 路径。Qt DLL 由 Qt Creator kit 提供。
+
+完整配置说明（Kit、运行时目录、qmake 限制）见 [Qt Creator 开发指南](docs/QT_CREATOR.md)。
+
+`build-qtcreator-full/`、`build-qtcreator-editor/`、`.qtcreator/` 和 `*.pro.user` 都是本机生成物，不进入版本控制。
+
+## 缓存与临时文件
+
+运行时的 HSC 工作区、Python 整车导入暂存等临时数据统一放在 **`<程序目录>/cache`**：
+
+- `cache/hsc/runtime-*`：HSC 原生世界工作区（默认在同一次运行结束时删除）
+- `cache/import/*`：整车导入暂存
+
+如果程序目录不可写，自动回退到系统缓存目录下的 `BaguaDT-cache`。启动时会清理 `cache/hsc` 和 `cache/import` 中上次异常退出遗留的目录，并清理旧版本直接写在程序目录的 `hsc-runtime-*` / `hsc-probe-*`。打包脚本不会再分发 `cache` 或任何临时目录。
 
 ## 运行
 
-已打包版本：双击 `dist/BaguaDT/BaguaDT.exe`。程序默认打开四个基本几何体组成的示例。
+已打包版本：双击 `dist/BaguaDT/BaguaDT.exe`。正常启动会先打开**项目管理**窗口，不会预先创建一个初始场景；从最近项目选择、浏览 `.bgp`，或用「新建项目」从空白场景开始。关闭项目管理窗口会退出程序。
+
+命令行显式给出场景/项目路径时会跳过项目管理直接打开：
 
 ```powershell
 .\dist\BaguaDT\BaguaDT.exe .\examples\starter.bagua.json
 ```
+
+`--capture`、`--record`、`--simulate-steps` 等自动化模式也跳过项目管理，以免阻塞截图和批处理。
 
 批量导出高质量录制时不必逐帧操作界面：`--record run.brec --simulate-steps N` 会一个物理步一帧地录制并写盘，见 [资产和回放说明](docs/ASSETS_AND_REPLAY.md#本机仿真录制)。
 
@@ -37,10 +98,13 @@
 | 相机漫游 | 按住右键，W/S 前后、A/D 左右、Q/E 下上；鼠标原地转向 |
 | 漫游加速 / 调速 | 按住右键时 Shift 加速 / 滚轮调节移动速度 |
 | 相机环绕 / 平移 / 缩放 | Alt+左键拖动 / 中键拖动 / 未按右键时滚轮 |
-| 选择 | 点击模型或场景树；空白处点击取消选择 |
+| 选择 | 点击模型或场景树；空白处点击取消选择；双击聚焦；场景树可过滤 |
 | 移动 / 旋转 / 缩放 | 视口获焦且松开右键时 W / E / R；也可点击工具栏 |
-| 操作柄 | 拖动彩色轴或旋转环；Shift 精细调整；Esc 取消当前拖动 |
-| 聚焦 / 重置相机 | F / Home |
+| 操作柄 | 拖动彩色轴、平面柄或中心柄；旋转工具另有屏幕空间旋转环；Shift 精细调整；Esc 取消当前拖动 |
+| 变换坐标系 / 吸附 | L 切换世界 / 局部；G 开关吸附；拖动时按住 Ctrl 临时吸附；工具栏选择步长 |
+| 精确微调 | 数值框可拖动刷值、Esc 还原；方向键沿 X/Z、PageUp/PageDown 沿 Y 微调（Shift ×10） |
+| 行重置 | 属性面板每行末尾 ↺ 恢复位置 / 旋转 / 缩放 / 尺寸默认值 |
+| 聚焦 / 重置相机 | F / Home；Ctrl+Home 框选全部对象 |
 | 创建立方体 / 球 / 圆柱 / 平面 | Ctrl+1 / 2 / 3 / 4；创建菜单或底部资源按钮 |
 | 复制 / 删除 / 重命名 | Ctrl+D / Delete / F2；名称也可在右侧编辑 |
 | 位置、姿态、缩放、几何尺寸 | 属性面板中输入数值后按 Enter 或离开输入框 |
@@ -54,6 +118,10 @@
 | CUDA / Chrono 自检 | 工具 → 验证 CUDA / Chrono 后端 |
 | 刚体碰撞、固定状态、质量 | 右侧「刚体物理」属性组 |
 | 初始平移 / 转动速度 | 右侧「初始速度」属性组 |
+| 装配约束 | 右侧「装配 · 约束」（与属性并列）：选 A/B、共同连接点、轴向与参数后新建；选中约束时视口高亮锚点和轴线 |
+| 仿真运行 | 物理求解在独立工作线程完成；运行 / 暂停 / 单步 / 重置不阻塞界面 |
+| 锚点精确放置 | 「装配 · 锚点」：表面 / 最近顶点 / 面中心 / 网格顶点吸附，或直接输入局部坐标 |
+| 接触排除 | 「装配 · 接触排除」：关闭故意重叠部件之间的接触 |
 | 开始 / 继续模拟、暂停模拟、单步模拟、重置模拟 | 顶栏或 F5 / F6 / F7 / F8；始终仅控制物理模拟 |
 | 物理后端开关 / 弹性材料 | 工具 → 物理模拟设置 / 属性面板「弹性体 · FEM」 |
 | 导入网格 | Ctrl+I；支持多选、单位/向上轴转换；也可拖入文件 |
@@ -62,7 +130,7 @@
 | 一键模拟并录制 | 底部「▶● 模拟并录制」：启动模拟的同时开始录制 |
 | 高质量录制 | 底部勾选「离线高质量」：锁定固定步长，不追实时，回放帧间距等于场景 dt |
 | 回放控制 | 仅底部记录栏：开始回放、暂停、退出、时间轴、前后帧、速度、循环、插值 |
-| 完整项目 | 文件 → 保存完整项目 / 打开 `.bagua.project.json` |
+| 完整项目 | 项目 → 项目管理 / 新建 / 打开 / 保存 `.bgp` |
 
 移动柄使用世界坐标轴；旋转环绕世界坐标轴；缩放柄沿对象的局部坐标轴。每次拖动只生成一条撤销记录。输入框编辑期间，文本编辑快捷键由输入框处理。
 
@@ -155,27 +223,45 @@ cmake --build build-manual
 
 ## 代码结构
 
+源代码按依赖方向分为 `app / core / render / simulation / io / ui` 六层，完整职责和拆分约定见 [docs/SOURCE_LAYOUT.md](docs/SOURCE_LAYOUT.md)。
+
 | 文件 | 职责 |
 | --- | --- |
-| `src/Scene.*` | 独立场景数据、JSON 验证 / 原子保存、快照撤销命令 |
-| `src/Geometry.*` | 基本几何网格与射线 / 三角形拾取 |
-| `src/Viewport.*` | OpenGL 渲染、相机、选中高亮和操作柄交互 |
-| `src/MainWindow.*` | 多文档页签、活动撤销栈、菜单、停靠面板、属性编辑与文件流程 |
-| `src/Backends.*` | CUDA 对照与 Chrono 实际步进自检 |
-| `src/Hsc.*` / `src/ChronoHsc.*` | CPU HSC 参考算法与公开 Chrono 求解器接口适配（保留的基线） |
-| `src/HscNative.*` | 原生后端桥：场景 → JSON → `BaguaHscNative.dll`，快照回读与状态统计 |
+| `src/app/main.cpp` | 进程入口、命令行、主题和确定性截屏 |
+| `src/core/Scene.*` | 独立场景数据、JSON 验证 / 原子保存、快照撤销命令 |
+| `src/core/Geometry.*` | 基本几何网格与射线 / 三角形拾取 |
+| `src/core/Cache.*` | `<程序目录>/cache` 创建、启动清理与旧临时目录迁移 |
+| `src/render/Viewport.*` | OpenGL 渲染、相机、选择轮廓、轴向 / 平面 / 中心操作柄、吸附与视口 HUD |
+| `src/render/Theme.*` | 浅色编辑器主题与控件样式 |
+| `src/ui/MainWindow.cpp` | 多文档页签、活动撤销栈、菜单、工具栏与文档生命周期 |
+| `src/ui/MainWindowDocks.cpp` | 场景树、属性面板、变换字段、选择同步 |
+| `src/ui/MainWindowFile.cpp` | 打开 / 保存 / 另存为 / 关闭确认 |
+| `src/ui/MainWindowSimulation.cpp` | 仿真控制、状态栏与工作线程帧回调 |
+| `src/ui/MainWindowProject.cpp` | `.bgp` 项目状态、最近项目与项目管理入口 |
+| `src/ui/MainWindowComponents.cpp` | 组件拆分 / 导入与网格导入对话框 |
+| `src/ui/MainWindowAssemblyWizard.cpp` | 四轮悬挂、轮辋-轮胎缝合与 HSC 预设 |
+| `src/ui/VehicleAssemblyDialog.*` | 车辆装配向导界面与自动名称匹配 |
+| `src/ui/ProjectManagerDialog.*` | 专用项目管理界面：最近项目、场景清单与缺失检查 |
+| `src/ui/MainWindowAssemblyPanel.cpp` | 装配页控件树与事件绑定 |
+| `src/ui/MainWindowAssembly.cpp` | 约束读写、表单同步、锚点拾取与运行时诊断 |
+| `src/ui/EditorControls.*` | 可拖动刷值的数值框、可折叠属性分组 |
+| `src/simulation/SimulationSession.*` | 独立仿真工作线程、GUI 侧快照、启动 / 暂停 / 单步 / 重置会话 |
+| `src/simulation/Physics.*` | 后端选择、Chrono 运行时、碰撞体、质量惯量、固定步长动力学及预览状态 |
+| `src/simulation/Backends.*` | CUDA 对照与 Chrono 实际步进自检 |
+| `src/simulation/Hsc.*` / `src/simulation/ChronoHsc.*` | CPU HSC 参考算法与公开 Chrono 求解器接口适配（保留的基线） |
+| `src/simulation/HscNative.*` | 原生后端桥：场景 → JSON → `BaguaHscNative.dll`，快照回读与状态统计 |
+| `src/simulation/Fem.*` / `src/ui/MainWindowFem.cpp` | 弹性盒四面体、变形表面及参数编辑 |
+| `src/simulation/CudaBackend.cu` | CUDA 世界包围盒计算，结果与 CPU 对照 |
 | `native/HscNativeWorld.cpp` | 原生世界：ABD、四面体 FEM、接触、关节、连接与快照 |
 | `native/LinearHsc.cu` / `native/overlays/` | CUDA HSC 线性求解器与 libuipc 覆盖层补丁 |
-| `src/Physics.*` | 后端选择、Chrono 运行时、碰撞体、质量惯量、固定步长动力学及预览状态 |
-| `src/Fem.*` / `src/MainWindowFem.cpp` | 弹性盒四面体、变形表面及参数编辑 |
-| `src/MainWindowSettings.cpp` | 物理后端开关、参数和便携设置 |
-| `src/MainWindowVelocity.cpp` | 初始平移 / 转动速度编辑 |
-| `src/Assets.*` | 网格导入（含 Gmsh 四面体）、单位与坐标转换、内嵌资产序列化 |
-| `src/Recording.*` | 记录写入、索引读取、解压缓存、刚体与变形顶点插值 |
-| `src/MainWindowAssets.cpp` | 资产库、录制/回放面板、便携项目与拖放 |
+| `src/ui/MainWindowSettings.cpp` | 物理后端开关、参数和便携设置 |
+| `src/ui/MainWindowVelocity.cpp` | 初始平移 / 转动速度编辑 |
+| `src/ui/MainWindowAssets.cpp` | 资产库、录制/回放面板与拖放 |
+| `src/io/Assets.*` | 网格导入（含 Gmsh 四面体）、单位与坐标转换、内嵌资产序列化 |
+| `src/io/ProjectFile.*` | `.bgp` 项目清单解析、路径安全校验与场景/录制状态 |
+| `src/io/Recording.*` | 记录写入、索引读取、解压缓存、刚体与变形顶点插值 |
 | `scripts/ImportHSC.py` | 从 HSC 真实快照转换两组自包含回放与来源记录 |
 | `scripts/BuildHscNative.ps1` | 固定版本 libuipc 的拉取、补丁与构建 |
-| `src/CudaBackend.cu` | CUDA 世界包围盒计算，结果与 CPU 对照 |
 | `tests/EditorTests.cpp` | 场景持久化、异常文件、几何拾取、原生后端和编辑交互测试 |
 
 关闭 HSC 时，含弹性体的场景使用 Chrono SMC + 共旋四面体 FEM（默认 SparseLU）；纯刚体使用 NSC / PSOR。开启 HSC 时整套物理改由原生 libuipc 后端负责：ABD、四面体 FEM、IPC 接触与 CCD、Newton，以及本项目移植的 CUDA HSC 线性求解器。详见 [HSC 接入说明](docs/HSC_INTEGRATION.md)。
@@ -201,7 +287,7 @@ CUDA 参与三处：场景包围盒自检、原生后端的接触与求解内核
 图形检查可生成本应用窗口截图并自动退出：
 
 ```powershell
-.\dist\BaguaDT\BaguaDT.exe --capture D:/Collection/BaguaDT/artifacts/editor-preview.png
+.\dist\BaguaDT\BaguaDT.exe --capture D:/Collection/BaguaDT/docs/images/capture.png
 ```
 
 依赖声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。项目代码采用 MIT 许可证。

@@ -14,23 +14,66 @@ dist/
 # --- 运行、测试与截图输出 ---
 artifacts/
 artifacts-*
+cache/
 hsc-runtime-*/
+hsc-probe-*/
 *.log
 /BaguaDT.ini
+/test-results.txt
 
 # --- CMake / Ninja / CTest 生成物（防止误留在根目录） ---
 CMakeCache.txt
 CMakeFiles/
 CMakeUserPresets.json
 cmake_install.cmake
+cmake_uninstall.cmake
+CTestCustom.cmake
 CTestTestfile.cmake
+DartConfiguration.tcl
 Testing/
+_CPack_Packages/
+CPackConfig.cmake
+CPackSourceConfig.cmake
 install_manifest.txt
 compile_commands.json
 build.ninja
 rules.ninja
 .ninja_deps
 .ninja_log
+
+# --- Qt Creator / qmake 本机配置与源目录内构建 ---
+*.pro.user
+*.pro.user.*
+.qtcreator/
+.qtc_clangd/
+CMakeLists.txt.user*
+.qmake.cache
+.qmake.stash
+.qmake.super
+# qmake fallback 位于 qmake/；限定路径以免隐藏手写 Makefile 或源码。
+/qmake/Makefile
+/qmake/Makefile.*
+/qmake/debug/
+/qmake/release/
+/qmake/moc_*.cpp
+/qmake/moc_predefs.h
+/qmake/ui_*.h
+/qmake/qrc_*.cpp
+
+# --- 编译与链接产物（不包含可用作网格资产的 *.obj） ---
+*.o
+*.a
+*.lib
+*.dll
+*.exe
+*.so
+*.so.*
+*.dylib
+*.pch
+*.res
+*.idb
+*.ipdb
+*.iobj
 
 # --- Visual Studio / MSVC ---
 .vs/
@@ -51,14 +94,20 @@ rules.ninja
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.venv/
+venv/
 
 # --- 编辑器与系统文件 ---
 .idea/
 .vscode/
 *~
 *.swp
+*.swo
+.cache/clangd/
+.clangd/index/
 .DS_Store
 Thumbs.db
+ehthumbs.db
 desktop.ini
 
 # --- 本机工作文件 ---

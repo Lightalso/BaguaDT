@@ -1,4 +1,28 @@
-# 最新审计验证（2026-10-19）
+# 最新验证
+
+> 2026-10-26 清理：历史验证日志与散落截图已从仓库删除；历史段落保留结论，原 `artifacts-*` / `artifacts/` 文件不再提供。当前截图保存在 `docs/images/`。
+
+## 2026-10-26 交互、GUI 装配与项目管理
+
+- 仅编辑器构建：**46 passed / 0 failed / 20 skipped**；跳过项全部依赖 CUDA / Chrono 或需要显式启用的慢速整车 HSC 用例。
+- 完整 C++ / CUDA / Chrono 构建：**65 passed / 0 failed / 1 skipped**；跳过项为需要 `BAGUA_SLOW_VEHICLE_HSC=1` 的完整整车 HSC 集成用例。
+- 启动流程：`startupLauncherHasNoSceneTab` 验证正常启动时 `scene == nullptr`、场景页签为 0，选择项目后才创建页签。
+- 缝合空锚点：`stitchPickWithoutAnchorsShowsError` 覆盖“拾取 A/B 时 A 部件没有锚点”的路径；现在显示错误提示，不再访问空 `anchors` 向量。
+- 视口装配显示：`assemblyViewportOverlayToggleAndHighlight` 验证装配显示开关、锚点开关、面板复选框同步，以及选中装配的双部件高亮和标签；截图见 `images/ui-assembly-highlight.png`。
+- 缝合配对：`stitchPairEditorUsesReadableTargets` 验证 A 下拉框显示世界坐标、B 网格顶点显示可读目标、距离列和配对信息可见。
+- 项目保存：新项目默认从文档目录开始；保存前检查目标目录、可写性和文件夹冲突，错误信息包含具体路径与 `QSaveFile` 原因；`projectSaveErrorReportsPath` 覆盖父路径是文件的失败分支。
+- 编译告警：`validateBackends` 未使用参数、`LinkChange` 初始化顺序、`Assets` / `HscNative` / `MainWindowAssets` 局部变量遮蔽、测试未使用变量和 CUDA 未使用内核均已清理；`MainWindow.cpp` 增加显式 Qt 头文件并移除未使用的 `<cmath>`，qmake shadow build 改用 `$$_PRO_FILE_PWD_` 解析项目内 include。
+- 缓存改造：`cacheUsesDedicatedDirectory` 验证临时目录位于 `<程序目录>/cache`，并验证旧版直接写在程序目录的 `hsc-runtime-*` 会被启动清理；完整测试运行后 `build/` 与 `dist/BaguaDT/` 根目录不再出现 `hsc-runtime-*` / `hsc-probe-*`。
+- Qt Creator：`CMakePresets.json` 的 `qtcreator-editor` 已配置、构建并通过编辑器测试；`qtcreator-full` 已配置并构建 `BaguaDT`，Chrono/HSC 运行库自动复制到可执行文件旁；`BaguaDT.pro` qmake 编辑器项目也已实际构建成功。
+- 完整整车 HSC 集成（手动启用）：从 `ground_1e8` 参考场景拆分 20 个组件、逐个导入、装配向导生成 19 条约束，HSC 启动、首帧推进并录制一帧，**3 passed / 0 failed**（约 33 s，和 GPU 首次编译/缓存有关）。
+- 仿真线程：`Physics`（HSC / Chrono）在独立 `QThread` 中构建、步进和销毁；GUI 只接收 `SimulationFrame` 快照。`simulationRunsOnWorkerThread` 断言求解线程不是 GUI 线程；`simulationControlsAndTabs`、`hscLiveRecordingAndProperties`、`linkSceneCloseWhileRunning` 等工作线程路径通过。
+- 项目格式：`.bgp` 清单解析、路径越界拒绝、场景/录制存在性检查与项目管理窗口由 `projectManagerUsesBgpFormat` 覆盖；`examples/HSC/HSC.bgp`、`examples/hsc-vehicle/HSC-Vehicle.bgp` 已转换。
+- 新增覆盖：组件导出 / 导入保留网格、四面体、质量、固定状态与锚点；车辆装配向导自动匹配四轮与松散轮胎，生成 4 移动副 + 4 转动副 + 11 缝合 + 8 接触排除；`guiAssembledVehicleHscStep` 验证 HSC 首帧与录制。
+- 新增覆盖：轴向 / 平面 / 中心操作柄、网格吸附、世界 / 局部切换、方向键微调，装配共同连接点与约束创建，顶点吸附，场景树过滤与属性行重置 / 撤销。
+- 原有装配、场景持久化、录制回放、Chrono / HSC 测试继续通过。交互细节见 [交互与装配操作](INTERACTION.md)。
+- 截图：`images/ui-main.png`、`images/ui-assembly.png`、`images/ui-assembly-highlight.png`、`images/ui-project-manager.png`、`images/ui-vehicle-wizard.png`、`images/ui-stitch-editor.png`。
+
+## 2026-10-19 审计
 
 - 完整 C++ / CUDA / Chrono 构建：**48 passed / 0 failed / 0 skipped**，包含故意制造求解失败的恢复测试。
 - 编辑器独立构建：**31 passed / 0 failed / 17 skipped**；跳过项均依赖物理后端。旧构建缓存的中文 include 前缀乱码已被构建脚本自动识别并清理，新建构建目录也独立验证通过。

@@ -1,0 +1,79 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "baguadt-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_PREFIX_PATH": "${sourceDir}/.deps/Qt/6.8.3/msvc2022_64;${sourceDir}/.deps/chrono-install",
+        "BAGUA_EIGEN_INCLUDE": "${sourceDir}/.deps/eigen-3.4.0",
+        "BUILD_TESTING": "ON",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "qtcreator-full",
+      "displayName": "Qt Creator · Full (CUDA + Chrono) — 默认",
+      "description": "默认配置：完整编辑器、测试和 HSC/Chrono 后端。适用于运行示例和整车装配。",
+      "inherits": "baguadt-base",
+      "binaryDir": "${sourceDir}/build-qtcreator-full",
+      "cacheVariables": {
+        "BAGUA_ENABLE_CUDA": "ON",
+        "BAGUA_ENABLE_CHRONO": "ON",
+        "CMAKE_CUDA_COMPILER": "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.4/bin/nvcc.exe",
+        "CMAKE_CUDA_ARCHITECTURES": "89"
+      }
+    },
+    {
+      "name": "qtcreator-editor",
+      "displayName": "Qt Creator · Editor only",
+      "description": "仅编辑器与 UI 测试，不依赖 CUDA/Chrono；适合快速开发界面和装配逻辑。非默认配置。",
+      "inherits": "baguadt-base",
+      "binaryDir": "${sourceDir}/build-qtcreator-editor",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "BAGUA_ENABLE_CUDA": "OFF",
+        "BAGUA_ENABLE_CHRONO": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "qtcreator-full",
+      "displayName": "Build full (CUDA + Chrono)",
+      "configurePreset": "qtcreator-full",
+      "jobs": 6
+    },
+    {
+      "name": "qtcreator-editor",
+      "displayName": "Build editor only",
+      "configurePreset": "qtcreator-editor",
+      "jobs": 6
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "qtcreator-full",
+      "displayName": "Test full",
+      "configurePreset": "qtcreator-full",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "qtcreator-editor",
+      "displayName": "Test editor",
+      "configurePreset": "qtcreator-editor",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}
